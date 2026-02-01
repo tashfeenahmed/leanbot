@@ -30,5 +30,12 @@
     "vitest": "^2.0.0"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.72.1",
+    "dotenv": "^17.2.3",
+    "grammy": "^1.39.3",
+    "groq-sdk": "^0.37.0",
+    "nanoid": "^5.1.6",
+    "openai": "^6.17.0",
+    "pino": "^10.3.0"
   }
 }

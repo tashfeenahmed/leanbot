@@ -7,7 +7,7 @@
 | Milestone | Name | Focus | Status |
 |-----------|------|-------|--------|
 | 1 | **MVP** | End-to-end working bot | ✅ Complete |
-| 2 | **Smart Routing** | Cost efficiency | Pending |
+| 2 | **Smart Routing** | Cost efficiency | ✅ Complete |
 | 3 | **Full Features** | Feature parity + extras | Pending |
 | 4 | **Production Ready** | Polish & reliability | Pending |
 
@@ -29,27 +29,16 @@ Working personal AI assistant via Telegram that executes tasks on VPS with sessi
 
 ---
 
-## Milestone 2: Smart Routing
+## Milestone 2: Smart Routing ✅
 
 Cost efficiency through intelligent model selection and context management.
 
-### 2.1 Complexity Analyzer
-- Tier detection: trivial, simple, moderate, complex
-- Signals: token count, code presence, keywords, tool prediction
+- [x] **Complexity Analyzer**: Tier detection (trivial/simple/moderate/complex), signals (tokens, code, keywords, tools)
+- [x] **Multiple Providers**: OpenAI, Groq, Ollama (local), OpenRouter with health checking and fallback chain
+- [x] **Cost Tracking**: Per-request tracking with model pricing, daily/monthly budgets with hard stops, 75% warning
+- [x] **Sliding Window Context**: Hot window (5 messages) + warm summary, tool output truncation (30KB), auto-compress at 70%
 
-### 2.2 Multiple Providers
-- OpenAI, Groq, Ollama (local), OpenRouter
-- Provider health checking and fallback chain
-
-### 2.3 Cost Tracking
-- Per-request tracking with model pricing
-- Daily/monthly budget limits with hard stops
-- 75% warning threshold
-
-### 2.4 Sliding Window Context
-- Hot window (last 5 messages) + warm summary (compressed older context)
-- Tool output truncation (30KB max) with hash retrieval
-- Auto-compress at 70% capacity
+**Tests**: 217 passing | **Status**: Shipped
 
 ---
 
