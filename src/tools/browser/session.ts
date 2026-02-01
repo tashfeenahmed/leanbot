@@ -1,0 +1,549 @@
+/**
+ * Browser Session Manager
+ *
+ * Manages a persistent Playwright browser instance for automation.
+ * Uses lazy loading - browser only starts when first needed.
+ *
+ * Note: Requires optional dependency playwright
+ */
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+import type { Logger } from 'pino';
+import type {
+  BrowserSessionConfig,
+  BrowserSessionState,
+  PageSnapshot,
+  ElementRef,
+  ScreenshotResult,
+  BrowserCookie,
+  NavigateOptions,
+  ClickOptions,
+  TypeOptions,
+  WaitOptions,
+} from './types.js';
+
+// Dynamic import for optional dependency
+let playwright: any;
+
+async function loadPlaywright(): Promise<boolean> {
+  try {
+    playwright = await (eval('import("playwright")') as Promise<any>);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Singleton browser session manager
+ */
+export class BrowserSession {
+  private static instance: BrowserSession | null = null;
+
+  private browser: any = null;
+  private context: any = null;
+  private page: any = null;
+  private config: BrowserSessionConfig;
+  private logger: Logger | null;
+  private elementRefs: Map<number, string> = new Map();
+  private nextRefId = 1;
+
+  private constructor(config: BrowserSessionConfig = {}) {
+    this.config = {
+      headless: true,
+      viewport: { width: 1280, height: 720 },
+      timeout: 30000,
+      ...config,
+    };
+    this.logger = config.logger || null;
+  }
+
+  /**
+   * Get or create the browser session instance
+   */
+  static getInstance(config?: BrowserSessionConfig): BrowserSession {
+    if (!BrowserSession.instance) {
+      BrowserSession.instance = new BrowserSession(config);
+    }
+    return BrowserSession.instance;
+  }
+
+  /**
+   * Reset the singleton (for testing)
+   */
+  static resetInstance(): void {
+    if (BrowserSession.instance) {
+      BrowserSession.instance.close().catch(() => {});
+      BrowserSession.instance = null;
+    }
+  }
+
+  /**
+   * Check if Playwright is available
+   */
+  async isAvailable(): Promise<boolean> {
+    return loadPlaywright();
+  }
+
+  /**
+   * Initialize browser if not already open
+   */
+  private async ensureBrowser(): Promise<void> {
+    if (this.browser) return;
+
+    const isAvailable = await loadPlaywright();
+    if (!isAvailable) {
+      throw new Error(
+        'Browser automation requires Playwright. Install with: npm install playwright && npx playwright install chromium'
+      );
+    }
+
+    this.logger?.info('Launching browser...');
+
+    this.browser = await playwright.chromium.launch({
+      headless: this.config.headless,
+    });
+
+    this.context = await this.browser.newContext({
+      viewport: this.config.viewport,
+      userAgent: this.config.userAgent,
+    });
+
+    this.page = await this.context.newPage();
+    this.page.setDefaultTimeout(this.config.timeout || 30000);
+
+    this.logger?.info('Browser launched successfully');
+  }
+
+  /**
+   * Get current session state
+   */
+  async getState(): Promise<BrowserSessionState> {
+    if (!this.page) {
+      return { isOpen: false };
+    }
+
+    try {
+      return {
+        isOpen: true,
+        currentUrl: this.page.url(),
+        pageTitle: await this.page.title(),
+      };
+    } catch {
+      return { isOpen: false };
+    }
+  }
+
+  /**
+   * Navigate to a URL
+   */
+  async navigate(url: string, options: NavigateOptions = {}): Promise<void> {
+    await this.ensureBrowser();
+
+    this.logger?.info({ url }, 'Navigating to URL');
+
+    await this.page.goto(url, {
+      waitUntil: options.waitUntil || 'domcontentloaded',
+      timeout: options.timeout || this.config.timeout,
+    });
+
+    // Clear element refs after navigation
+    this.clearRefs();
+  }
+
+  /**
+   * Take a snapshot of the current page with element references
+   */
+  async snapshot(): Promise<PageSnapshot> {
+    await this.ensureBrowser();
+
+    this.clearRefs();
+
+    const url = this.page.url();
+    const title = await this.page.title();
+
+    // Get interactable elements
+    const elements: ElementRef[] = await this.page.evaluate(`
+      (() => {
+        const interactable = document.querySelectorAll(
+          'a, button, input, select, textarea, [role="button"], [role="link"], [onclick], [tabindex]'
+        );
+
+        return Array.from(interactable).map((el, index) => {
+          const rect = el.getBoundingClientRect();
+          const tag = el.tagName.toLowerCase();
+          const text =
+            el.innerText?.trim().substring(0, 100) ||
+            el.value?.substring(0, 100) ||
+            el.getAttribute('aria-label') ||
+            el.getAttribute('placeholder') ||
+            '';
+
+          // Build a unique selector
+          let selector = tag;
+          if (el.id) {
+            selector = '#' + el.id;
+          } else if (el.name) {
+            selector = tag + '[name="' + el.name + '"]';
+          } else if (el.className && typeof el.className === 'string') {
+            const classes = el.className.split(' ').filter(c => c).slice(0, 2);
+            if (classes.length) {
+              selector = tag + '.' + classes.join('.');
+            }
+          }
+
+          return {
+            ref: index + 1,
+            tag,
+            text: text || undefined,
+            role: el.getAttribute('role') || undefined,
+            selector,
+            attributes: {
+              type: el.type || undefined,
+              href: el.href || undefined,
+              name: el.name || undefined,
+              placeholder: el.placeholder || undefined,
+            },
+            rect:
+              rect.width > 0 && rect.height > 0
+                ? {
+                    x: Math.round(rect.x),
+                    y: Math.round(rect.y),
+                    width: Math.round(rect.width),
+                    height: Math.round(rect.height),
+                  }
+                : undefined,
+          };
+        });
+      })()
+    `);
+
+    // Store refs for later use
+    for (const el of elements) {
+      this.elementRefs.set(el.ref, el.selector);
+    }
+    this.nextRefId = elements.length + 1;
+
+    // Get page text content
+    const text = await this.page.evaluate(`
+      document.body?.innerText?.substring(0, 5000) || ''
+    `);
+
+    return {
+      url,
+      title,
+      elements: elements.filter((el) => el.rect), // Only visible elements
+      text,
+      timestamp: Date.now(),
+    };
+  }
+
+  /**
+   * Click an element by ref number, selector, or text
+   */
+  async click(
+    target: number | string,
+    options: ClickOptions = {}
+  ): Promise<void> {
+    await this.ensureBrowser();
+
+    const selector = this.resolveTarget(target);
+    this.logger?.info({ target, selector }, 'Clicking element');
+
+    await this.page.click(selector, {
+      button: options.button || 'left',
+      clickCount: options.clickCount || 1,
+      delay: options.delay,
+    });
+  }
+
+  /**
+   * Type text into an element
+   */
+  async type(
+    target: number | string,
+    text: string,
+    options: TypeOptions = {}
+  ): Promise<void> {
+    await this.ensureBrowser();
+
+    const selector = this.resolveTarget(target);
+    this.logger?.info({ target, selector, textLength: text.length }, 'Typing into element');
+
+    if (options.clear) {
+      await this.page.fill(selector, '');
+    }
+
+    await this.page.type(selector, text, {
+      delay: options.delay || 50,
+    });
+  }
+
+  /**
+   * Fill an input (faster than type, replaces content)
+   */
+  async fill(target: number | string, value: string): Promise<void> {
+    await this.ensureBrowser();
+
+    const selector = this.resolveTarget(target);
+    this.logger?.info({ target, selector }, 'Filling input');
+
+    await this.page.fill(selector, value);
+  }
+
+  /**
+   * Press a key or key combination
+   */
+  async press(key: string): Promise<void> {
+    await this.ensureBrowser();
+
+    this.logger?.info({ key }, 'Pressing key');
+    await this.page.keyboard.press(key);
+  }
+
+  /**
+   * Select option from dropdown
+   */
+  async select(target: number | string, value: string): Promise<void> {
+    await this.ensureBrowser();
+
+    const selector = this.resolveTarget(target);
+    this.logger?.info({ target, selector, value }, 'Selecting option');
+
+    await this.page.selectOption(selector, value);
+  }
+
+  /**
+   * Wait for an element
+   */
+  async waitForElement(
+    selector: string,
+    options: WaitOptions = {}
+  ): Promise<void> {
+    await this.ensureBrowser();
+
+    this.logger?.info({ selector }, 'Waiting for element');
+
+    await this.page.waitForSelector(selector, {
+      timeout: options.timeout || this.config.timeout,
+      state: options.state || 'visible',
+    });
+  }
+
+  /**
+   * Wait for navigation to complete
+   */
+  async waitForNavigation(options: NavigateOptions = {}): Promise<void> {
+    await this.ensureBrowser();
+
+    this.logger?.info('Waiting for navigation');
+
+    await this.page.waitForNavigation({
+      waitUntil: options.waitUntil || 'domcontentloaded',
+      timeout: options.timeout || this.config.timeout,
+    });
+  }
+
+  /**
+   * Wait for a specific amount of time
+   */
+  async wait(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Take a screenshot
+   */
+  async screenshot(fullPage: boolean = false): Promise<ScreenshotResult> {
+    await this.ensureBrowser();
+
+    this.logger?.info({ fullPage }, 'Taking screenshot');
+
+    const buffer = await this.page.screenshot({
+      type: 'png',
+      fullPage,
+    });
+
+    const viewport = this.page.viewportSize();
+
+    return {
+      data: buffer,
+      format: 'png',
+      width: viewport?.width || 1280,
+      height: fullPage ? buffer.length / 4 / (viewport?.width || 1280) : viewport?.height || 720,
+    };
+  }
+
+  /**
+   * Extract text content from page or element
+   */
+  async extractText(selector?: string): Promise<string> {
+    await this.ensureBrowser();
+
+    if (selector) {
+      return this.page.textContent(selector) || '';
+    }
+
+    return this.page.evaluate(`document.body?.innerText || ''`);
+  }
+
+  /**
+   * Extract HTML content
+   */
+  async extractHtml(selector?: string): Promise<string> {
+    await this.ensureBrowser();
+
+    if (selector) {
+      return this.page.innerHTML(selector);
+    }
+
+    return this.page.content();
+  }
+
+  /**
+   * Get attribute value from element
+   */
+  async getAttribute(
+    target: number | string,
+    attribute: string
+  ): Promise<string | null> {
+    await this.ensureBrowser();
+
+    const selector = this.resolveTarget(target);
+    return this.page.getAttribute(selector, attribute);
+  }
+
+  /**
+   * Check if element exists
+   */
+  async elementExists(selector: string): Promise<boolean> {
+    await this.ensureBrowser();
+
+    const element = await this.page.$(selector);
+    return element !== null;
+  }
+
+  /**
+   * Scroll element into view
+   */
+  async scrollIntoView(target: number | string): Promise<void> {
+    await this.ensureBrowser();
+
+    const selector = this.resolveTarget(target);
+    await this.page.locator(selector).scrollIntoViewIfNeeded();
+  }
+
+  /**
+   * Scroll page by amount
+   */
+  async scroll(x: number, y: number): Promise<void> {
+    await this.ensureBrowser();
+
+    await this.page.evaluate(`window.scrollBy(${x}, ${y})`);
+  }
+
+  /**
+   * Go back in history
+   */
+  async goBack(): Promise<void> {
+    await this.ensureBrowser();
+    await this.page.goBack();
+    this.clearRefs();
+  }
+
+  /**
+   * Go forward in history
+   */
+  async goForward(): Promise<void> {
+    await this.ensureBrowser();
+    await this.page.goForward();
+    this.clearRefs();
+  }
+
+  /**
+   * Reload page
+   */
+  async reload(): Promise<void> {
+    await this.ensureBrowser();
+    await this.page.reload();
+    this.clearRefs();
+  }
+
+  /**
+   * Set cookies
+   */
+  async setCookies(cookies: BrowserCookie[]): Promise<void> {
+    await this.ensureBrowser();
+    await this.context.addCookies(cookies);
+  }
+
+  /**
+   * Get cookies
+   */
+  async getCookies(): Promise<BrowserCookie[]> {
+    await this.ensureBrowser();
+    return this.context.cookies();
+  }
+
+  /**
+   * Clear cookies
+   */
+  async clearCookies(): Promise<void> {
+    await this.ensureBrowser();
+    await this.context.clearCookies();
+  }
+
+  /**
+   * Execute JavaScript in page context
+   */
+  async evaluate<T>(script: string): Promise<T> {
+    await this.ensureBrowser();
+    return this.page.evaluate(script);
+  }
+
+  /**
+   * Close the browser session
+   */
+  async close(): Promise<void> {
+    if (this.browser) {
+      this.logger?.info('Closing browser');
+      await this.browser.close();
+      this.browser = null;
+      this.context = null;
+      this.page = null;
+      this.clearRefs();
+    }
+  }
+
+  /**
+   * Resolve target to selector
+   */
+  private resolveTarget(target: number | string): string {
+    if (typeof target === 'number') {
+      const selector = this.elementRefs.get(target);
+      if (!selector) {
+        throw new Error(
+          `Element ref ${target} not found. Run snapshot() first to get element refs.`
+        );
+      }
+      return selector;
+    }
+
+    // If starts with text=, use text selector
+    if (target.startsWith('text=')) {
+      return target;
+    }
+
+    // Otherwise treat as CSS selector
+    return target;
+  }
+
+  /**
+   * Clear element refs
+   */
+  private clearRefs(): void {
+    this.elementRefs.clear();
+    this.nextRefId = 1;
+  }
+}

@@ -41,12 +41,14 @@ export async function createDefaultToolRegistry(): Promise<ToolRegistryImpl> {
   const { WriteTool } = await import('./write.js');
   const { EditTool } = await import('./edit.js');
   const { BashTool } = await import('./bash.js');
+  const { BrowserTool } = await import('./browser/index.js');
 
   const registry = new ToolRegistryImpl();
   registry.registerTool(new ReadTool());
   registry.registerTool(new WriteTool());
   registry.registerTool(new EditTool());
   registry.registerTool(new BashTool());
+  registry.registerTool(new BrowserTool());
 
   return registry;
 }

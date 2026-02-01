@@ -106,7 +106,7 @@ describe('Gateway', () => {
       await gateway.initialize();
 
       const tools = gateway.getToolRegistry().getAllTools();
-      expect(tools.length).toBe(4); // read, write, edit, bash
+      expect(tools.length).toBe(5); // read, write, edit, bash, browser
     });
 
     it('should initialize session manager', async () => {
