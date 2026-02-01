@@ -15,7 +15,8 @@ LeanBot is a next-generation personal AI assistant architecture designed from th
 | No cost visibility until bill arrives | Real-time token/cost dashboard |
 | Same expensive model for all tasks | Tiered model routing by complexity |
 | Bloated session transcripts | Structured atomic memory |
-| Complex Docker/VPS setup required | Single binary, runs anywhere |
+| Sandboxed/restricted by default | Full user-level VPS access |
+| Complex Docker setup required | Single binary + systemd |
 | Tool outputs accumulate forever | Aggressive output truncation + caching |
 
 ---
@@ -675,7 +676,8 @@ leanbot/
 | **Token Efficiency** | Poor (full history every request) | Excellent (sliding window + compression) |
 | **Cost Visibility** | After the fact | Real-time dashboard |
 | **Model Routing** | Manual config | Automatic by complexity |
-| **Setup Complexity** | Docker + VPS recommended | Single binary |
+| **Deployment** | Docker sandbox recommended | Full user-level access (VPS) |
+| **Setup Complexity** | Docker + config files | Single binary + systemd |
 | **Tool Output Handling** | Accumulates forever | Truncate + cache + retrieve |
 | **Memory Architecture** | Append-only JSONL | Gardener (async fact extraction) |
 | **Session Model** | Linear | Tree (branching) |
@@ -723,26 +725,119 @@ leanbot/
 
 ---
 
+## Deployment Model: Full Machine Access
+
+LeanBot is designed to run on a **VPS as a full user-level agent** - not sandboxed, not containerized. It has the same access you would have if you SSH'd into the machine.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         YOUR VPS                                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   ┌─────────────────────────────────────────────────────────┐   │
+│   │                     LEANBOT                              │   │
+│   │                 (runs as user)                           │   │
+│   └─────────────────────────────────────────────────────────┘   │
+│                            │                                    │
+│         ┌──────────────────┼──────────────────┐                │
+│         ↓                  ↓                  ↓                │
+│   ┌───────────┐     ┌───────────┐     ┌───────────┐           │
+│   │  Files    │     │  Shell    │     │  Network  │           │
+│   │  System   │     │  Commands │     │  Access   │           │
+│   └───────────┘     └───────────┘     └───────────┘           │
+│         ↓                  ↓                  ↓                │
+│   ┌───────────┐     ┌───────────┐     ┌───────────┐           │
+│   │  Cron     │     │  Docker   │     │  Services │           │
+│   │  Jobs     │     │  (if any) │     │  & Daemons│           │
+│   └───────────┘     └───────────┘     └───────────┘           │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### What LeanBot Can Do
+
+| Capability | Access Level |
+|------------|--------------|
+| Read/write files | Full (user-level) |
+| Execute shell commands | Full (bash, zsh, etc.) |
+| Install packages | Yes (apt, brew, npm, pip, etc.) |
+| Manage services | Yes (systemctl, etc.) |
+| Network operations | Full (curl, ssh, etc.) |
+| Run Docker containers | Yes (if Docker installed) |
+| Access databases | Yes (psql, mysql, redis-cli, etc.) |
+| Manage cron jobs | Yes |
+| Git operations | Full |
+
+### Why Full Access?
+
+LeanBot is your **digital employee**, not a sandboxed chatbot. It needs to:
+- Deploy your code
+- Manage your servers
+- Run your scripts
+- Access your databases
+- Monitor your services
+
+**Sandboxing defeats the purpose.** If you want a restricted assistant, use a chatbot.
+
+---
+
 ## Quick Start
 
+### VPS Deployment (Recommended)
+
 ```bash
-# Install (single binary, no Docker required)
+# SSH into your VPS
+ssh user@your-vps.com
+
+# Install LeanBot
 curl -fsSL https://leanbot.dev/install.sh | sh
 
 # Initialize
 leanbot init
 
-# Configure your API keys
+# Configure API keys
 leanbot config set anthropic.key sk-ant-xxx
 leanbot config set openai.key sk-xxx
 
-# Set your daily budget
+# Set daily budget
 leanbot config set budget.daily 5.00
 
-# Run
+# Configure channels (how you'll talk to it)
+leanbot channel add telegram --token YOUR_BOT_TOKEN
+leanbot channel add discord --token YOUR_BOT_TOKEN
+
+# Run as daemon (always-on)
+leanbot daemon start
+
+# Or run with systemd (auto-restart on reboot)
+leanbot daemon install
+sudo systemctl enable leanbot
+sudo systemctl start leanbot
+```
+
+### Check Status
+
+```bash
+# View daemon status
+leanbot daemon status
+
+# View logs
+leanbot logs
+
+# View cost dashboard
+leanbot budget
+
+# Interactive CLI (for testing)
+leanbot chat
+```
+
+### Local Development
+
+```bash
+# Run locally for development/testing
 leanbot start
 
-# Or run in CLI mode
+# Or CLI mode
 leanbot chat
 ```
 
