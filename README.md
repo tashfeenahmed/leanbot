@@ -437,6 +437,61 @@ export default defineSkill({
 });
 ```
 
+### 9. Unified Cron (No Separate Heartbeats)
+
+OpenClaw has both **cron jobs** AND **heartbeats**. LeanBot simplifies: **cron does everything**.
+
+```
+OpenClaw:
+├── Cron system (scheduled tasks)
+├── Heartbeat system (keep-alive, cache warming)  ← redundant
+└── Two concepts to configure and debug
+
+LeanBot:
+└── Cron system (does both)  ← one concept
+```
+
+#### Cron Configuration
+
+```yaml
+cron:
+  # Daily standup summary
+  - name: "morning-briefing"
+    schedule: "0 8 * * 1-5"           # 8 AM weekdays
+    action: "Summarize my calendar and emails for today"
+    channel: "telegram"                # Where to send output
+    tier: "simple"                     # Use cheap model
+
+  # Cache warming (replaces heartbeats)
+  - name: "keepalive"
+    schedule: "*/55 * * * *"          # Every 55 min
+    action: "ping"                     # Built-in lightweight ping
+    silent: true                       # No output to user
+
+  # Weekly report
+  - name: "weekly-review"
+    schedule: "0 17 * * 5"            # Friday 5 PM
+    action: "Review what I accomplished this week from memory"
+    tier: "moderate"
+
+  # Proactive monitoring
+  - name: "inbox-check"
+    schedule: "*/30 * * * *"          # Every 30 min
+    action: "Check for urgent emails and notify me if any"
+    condition: "only_if_urgent"        # Don't spam
+```
+
+#### Why No Heartbeats?
+
+| Use Case | OpenClaw | LeanBot |
+|----------|----------|---------|
+| Cache warming | Heartbeat config | `cron: keepalive` |
+| Health checks | Heartbeat config | `cron: ping` |
+| Scheduled tasks | Cron config | `cron: *` |
+| Keep-alive | Heartbeat config | `cron: keepalive` |
+
+**One system. Fewer bugs. Less config. Lean.**
+
 ---
 
 ## Configuration
@@ -517,6 +572,18 @@ leanbot:
     response_ttl: 3600
     tool_output_ttl: 1800
     semantic_similarity_threshold: 0.92  # Cache hit threshold
+
+  # Cron (replaces heartbeats - one unified system)
+  cron:
+    - name: "keepalive"
+      schedule: "*/55 * * * *"         # Cache warming, replaces heartbeat
+      action: "ping"
+      silent: true
+    - name: "morning-briefing"
+      schedule: "0 8 * * 1-5"
+      action: "Summarize my calendar for today"
+      channel: "telegram"
+      tier: "simple"
 ```
 
 ---
@@ -582,6 +649,11 @@ leanbot/
 │   │   ├── dashboard.ts          # Cost visualization
 │   │   └── alerts.ts             # Budget alerts
 │   │
+│   ├── cron/
+│   │   ├── scheduler.ts          # Cron job scheduler
+│   │   ├── runner.ts             # Job execution
+│   │   └── builtins.ts           # Built-in actions (ping, etc.)
+│   │
 │   └── index.ts                  # Entry point
 │
 ├── config/
@@ -611,6 +683,7 @@ leanbot/
 | **Budget Controls** | External (API dashboard) | Built-in with hard stops |
 | **Skill Ecosystem** | ClawHub only | ClawHub + native + enhanced |
 | **Skill Cost Hints** | None | Built-in complexity routing |
+| **Proactive Automation** | Cron + Heartbeats (two systems) | Cron only (unified) |
 | **Estimated Daily Cost** | $30-200 | $3-15 (same usage) |
 
 ---
@@ -645,7 +718,7 @@ leanbot/
 ### Phase 4: Advanced Features
 - [ ] Session branching
 - [ ] Multi-agent orchestration
-- [ ] Proactive automation (cron)
+- [ ] Cron scheduler (replaces heartbeats - one concept, not two)
 - [ ] Cost prediction & optimization suggestions
 
 ---
