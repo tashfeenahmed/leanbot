@@ -151,7 +151,11 @@ describe('Router', () => {
     it('should skip unhealthy providers during selection', async () => {
       router = new Router({
         providerOrder: ['fast', 'slow'],
-        tierMapping: { fast: ['fast', 'slow'] },
+        tierMapping: {
+          fast: ['fast', 'slow'],
+          standard: ['fast', 'slow'],
+          capable: ['fast', 'slow'],
+        },
         unhealthyThreshold: 1,
       });
 
@@ -176,6 +180,8 @@ describe('Router', () => {
         providerOrder: ['primary', 'fallback1', 'fallback2'],
         tierMapping: {
           fast: ['primary', 'fallback1', 'fallback2'],
+          standard: ['primary', 'fallback1', 'fallback2'],
+          capable: ['primary', 'fallback1', 'fallback2'],
         },
       });
     });

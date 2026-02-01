@@ -11,6 +11,48 @@ vi.mock('../channels/telegram.js', () => ({
   })),
 }));
 
+// Helper to create complete mock config
+const createMockConfig = (testDir: string, overrides: Record<string, unknown> = {}) => ({
+  providers: {
+    anthropic: { apiKey: 'test-key', model: 'claude-sonnet-4-20250514' },
+    openai: { apiKey: '', model: 'gpt-4o' },
+    groq: { apiKey: '', model: 'llama-3.3-70b-versatile' },
+    ollama: { baseUrl: 'http://localhost:11434', model: 'llama3' },
+    openrouter: { apiKey: '', model: 'anthropic/claude-3-sonnet' },
+    ...((overrides.providers as Record<string, unknown>) || {}),
+  },
+  channels: {
+    telegram: { enabled: false, botToken: '' },
+    discord: { enabled: false, botToken: '', applicationId: '' },
+    ...((overrides.channels as Record<string, unknown>) || {}),
+  },
+  agent: {
+    workspace: testDir,
+    maxIterations: 20,
+    ...((overrides.agent as Record<string, unknown>) || {}),
+  },
+  logging: {
+    level: 'info' as const,
+    ...((overrides.logging as Record<string, unknown>) || {}),
+  },
+  routing: {
+    providerOrder: ['anthropic', 'openai', 'groq', 'ollama'],
+    enableComplexityAnalysis: true,
+    ...((overrides.routing as Record<string, unknown>) || {}),
+  },
+  cost: {
+    warningThreshold: 0.75,
+    ...((overrides.cost as Record<string, unknown>) || {}),
+  },
+  context: {
+    hotWindowSize: 5,
+    maxContextTokens: 128000,
+    compressionThreshold: 0.7,
+    maxToolOutputBytes: 30000,
+    ...((overrides.context as Record<string, unknown>) || {}),
+  },
+});
+
 describe('Gateway', () => {
   let testDir: string;
 
@@ -29,27 +71,7 @@ describe('Gateway', () => {
       const { pino } = await import('pino');
 
       const gateway = new Gateway({
-        config: {
-          providers: {
-            anthropic: {
-              apiKey: 'test-key',
-              model: 'claude-sonnet-4-20250514',
-            },
-          },
-          channels: {
-            telegram: {
-              enabled: false,
-              botToken: '',
-            },
-          },
-          agent: {
-            workspace: testDir,
-            maxIterations: 20,
-          },
-          logging: {
-            level: 'info',
-          },
-        },
+        config: createMockConfig(testDir),
         logger: pino({ level: 'silent' }),
       });
 
@@ -61,27 +83,7 @@ describe('Gateway', () => {
       const { pino } = await import('pino');
 
       const gateway = new Gateway({
-        config: {
-          providers: {
-            anthropic: {
-              apiKey: 'test-key',
-              model: 'claude-sonnet-4-20250514',
-            },
-          },
-          channels: {
-            telegram: {
-              enabled: false,
-              botToken: '',
-            },
-          },
-          agent: {
-            workspace: testDir,
-            maxIterations: 20,
-          },
-          logging: {
-            level: 'info',
-          },
-        },
+        config: createMockConfig(testDir),
         logger: pino({ level: 'silent' }),
       });
 
@@ -97,27 +99,7 @@ describe('Gateway', () => {
       const { pino } = await import('pino');
 
       const gateway = new Gateway({
-        config: {
-          providers: {
-            anthropic: {
-              apiKey: 'test-key',
-              model: 'claude-sonnet-4-20250514',
-            },
-          },
-          channels: {
-            telegram: {
-              enabled: false,
-              botToken: '',
-            },
-          },
-          agent: {
-            workspace: testDir,
-            maxIterations: 20,
-          },
-          logging: {
-            level: 'info',
-          },
-        },
+        config: createMockConfig(testDir),
         logger: pino({ level: 'silent' }),
       });
 
@@ -132,27 +114,7 @@ describe('Gateway', () => {
       const { pino } = await import('pino');
 
       const gateway = new Gateway({
-        config: {
-          providers: {
-            anthropic: {
-              apiKey: 'test-key',
-              model: 'claude-sonnet-4-20250514',
-            },
-          },
-          channels: {
-            telegram: {
-              enabled: false,
-              botToken: '',
-            },
-          },
-          agent: {
-            workspace: testDir,
-            maxIterations: 20,
-          },
-          logging: {
-            level: 'info',
-          },
-        },
+        config: createMockConfig(testDir),
         logger: pino({ level: 'silent' }),
       });
 
@@ -170,27 +132,7 @@ describe('Gateway', () => {
       const { pino } = await import('pino');
 
       const gateway = new Gateway({
-        config: {
-          providers: {
-            anthropic: {
-              apiKey: 'test-key',
-              model: 'claude-sonnet-4-20250514',
-            },
-          },
-          channels: {
-            telegram: {
-              enabled: false,
-              botToken: '',
-            },
-          },
-          agent: {
-            workspace: testDir,
-            maxIterations: 20,
-          },
-          logging: {
-            level: 'info',
-          },
-        },
+        config: createMockConfig(testDir),
         logger: pino({ level: 'silent' }),
       });
 
@@ -206,27 +148,12 @@ describe('Gateway', () => {
       const { pino } = await import('pino');
 
       const gateway = new Gateway({
-        config: {
-          providers: {
-            anthropic: {
-              apiKey: 'test-key',
-              model: 'claude-sonnet-4-20250514',
-            },
-          },
+        config: createMockConfig(testDir, {
           channels: {
-            telegram: {
-              enabled: true,
-              botToken: 'test-bot-token',
-            },
+            telegram: { enabled: true, botToken: 'test-bot-token' },
+            discord: { enabled: false, botToken: '', applicationId: '' },
           },
-          agent: {
-            workspace: testDir,
-            maxIterations: 20,
-          },
-          logging: {
-            level: 'info',
-          },
-        },
+        }),
         logger: pino({ level: 'silent' }),
       });
 
@@ -243,27 +170,12 @@ describe('Gateway', () => {
       const { pino } = await import('pino');
 
       const gateway = new Gateway({
-        config: {
-          providers: {
-            anthropic: {
-              apiKey: 'test-key',
-              model: 'claude-sonnet-4-20250514',
-            },
-          },
+        config: createMockConfig(testDir, {
           channels: {
-            telegram: {
-              enabled: true,
-              botToken: 'test-bot-token',
-            },
+            telegram: { enabled: true, botToken: 'test-bot-token' },
+            discord: { enabled: false, botToken: '', applicationId: '' },
           },
-          agent: {
-            workspace: testDir,
-            maxIterations: 20,
-          },
-          logging: {
-            level: 'info',
-          },
-        },
+        }),
         logger: pino({ level: 'silent' }),
       });
 

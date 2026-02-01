@@ -192,8 +192,8 @@ export function loadConfig(): Config {
   const result = configSchema.safeParse(rawConfig);
 
   if (!result.success) {
-    const errorMessages = result.error.errors
-      .map((err) => `${err.path.join('.')}: ${err.message}`)
+    const errorMessages = result.error.issues
+      .map((err) => `${err.path.map(String).join('.')}: ${err.message}`)
       .join('\n');
     throw new Error(`Configuration validation failed:\n${errorMessages}`);
   }

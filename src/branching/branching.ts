@@ -269,8 +269,9 @@ export function summarizeBranch(messages: Message[], branchName: string): string
     // Fall back to last assistant message
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === 'assistant') {
-        const content =
-          typeof messages[i].content === 'string' ? messages[i].content : '';
+        const msgContent = messages[i].content;
+        const content: string =
+          typeof msgContent === 'string' ? msgContent : '';
         if (content) {
           return `${branchName}: ${content.substring(0, 200)}...`;
         }

@@ -127,7 +127,7 @@ describe('TelegramChannel', () => {
         createSession: vi.fn().mockResolvedValue({ id: 'new-session' }),
         getSession: vi.fn().mockResolvedValue(undefined),
         listSessions: vi.fn().mockResolvedValue([]),
-      } as unknown as SessionManager;
+      } as unknown as InstanceType<typeof SessionManager>;
 
       const channel = new TelegramChannel({
         botToken: 'test-token',
@@ -150,7 +150,7 @@ describe('TelegramChannel', () => {
         createSession: vi.fn(),
         getSession: vi.fn().mockResolvedValue({ id: 'existing-session', metadata: { userId: 'user123' } }),
         listSessions: vi.fn().mockResolvedValue([{ id: 'existing-session' }]),
-      } as unknown as SessionManager;
+      } as unknown as InstanceType<typeof SessionManager>;
 
       const channel = new TelegramChannel({
         botToken: 'test-token',

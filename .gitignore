@@ -32,3 +32,6 @@ sessions/
 
 # TypeScript cache
 *.tsbuildinfo
+
+# Personal todos
+TODOS.md

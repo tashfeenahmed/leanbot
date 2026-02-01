@@ -261,10 +261,15 @@ export class DiscordChannel {
     );
 
     try {
-      // Show typing indicator
-      await message.channel.sendTyping();
+      // Show typing indicator (only for channels that support it)
+      const channel = message.channel;
+      if ('sendTyping' in channel && typeof channel.sendTyping === 'function') {
+        await channel.sendTyping();
+      }
       const typingInterval = setInterval(() => {
-        message.channel.sendTyping().catch(() => {});
+        if ('sendTyping' in channel && typeof channel.sendTyping === 'function') {
+          channel.sendTyping().catch(() => {});
+        }
       }, 5000);
 
       // Get or create session

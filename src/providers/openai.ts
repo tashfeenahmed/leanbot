@@ -165,12 +165,15 @@ export class OpenAIProvider implements LLMProvider {
     // Add tool calls
     if (choice.message.tool_calls) {
       for (const toolCall of choice.message.tool_calls) {
-        content.push({
-          type: 'tool_use',
-          id: toolCall.id,
-          name: toolCall.function.name,
-          input: JSON.parse(toolCall.function.arguments),
-        });
+        // Only handle function tool calls (not custom tool calls)
+        if ('function' in toolCall && toolCall.function) {
+          content.push({
+            type: 'tool_use',
+            id: toolCall.id,
+            name: toolCall.function.name,
+            input: JSON.parse(toolCall.function.arguments),
+          });
+        }
       }
     }
 

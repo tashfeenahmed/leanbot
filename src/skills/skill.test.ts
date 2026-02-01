@@ -475,8 +475,9 @@ describe('ClawHubClient', () => {
 
       const skill = await client.getSkill('calculator');
 
-      expect(skill.name).toBe('calculator');
-      expect(skill.content).toBeDefined();
+      expect(skill).not.toBeNull();
+      expect(skill!.name).toBe('calculator');
+      expect(skill!.content).toBeDefined();
     });
 
     it('should return null for unknown skill', async () => {
@@ -548,7 +549,7 @@ Test action.
       const popular = await client.listPopular();
 
       expect(popular).toHaveLength(2);
-      expect(popular[0].downloads).toBeGreaterThan(popular[1].downloads);
+      expect(popular[0].downloads!).toBeGreaterThan(popular[1].downloads!);
     });
   });
 });

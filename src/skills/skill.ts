@@ -359,7 +359,7 @@ export class ClawHubClient {
       );
     }
 
-    return response.json();
+    return response.json() as Promise<T>;
   }
 
   async searchSkills(query: string): Promise<ClawHubSkillInfo[]> {

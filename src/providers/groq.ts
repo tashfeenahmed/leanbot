@@ -1,5 +1,11 @@
 import Groq from 'groq-sdk';
 import type {
+  ChatCompletion,
+  ChatCompletionMessageParam,
+  ChatCompletionTool,
+  ChatCompletionCreateParamsNonStreaming,
+} from 'groq-sdk/resources/chat/completions';
+import type {
   LLMProvider,
   ProviderOptions,
   CompletionRequest,
@@ -50,7 +56,7 @@ export class GroqProvider implements LLMProvider {
   async complete(request: CompletionRequest): Promise<CompletionResponse> {
     const messages = this.formatMessages(request);
 
-    const params: Groq.ChatCompletionCreateParams = {
+    const params: ChatCompletionCreateParamsNonStreaming = {
       model: this.model,
       messages,
       max_tokens: request.maxTokens || DEFAULT_MAX_TOKENS,
@@ -68,8 +74,8 @@ export class GroqProvider implements LLMProvider {
 
   private formatMessages(
     request: CompletionRequest
-  ): Groq.ChatCompletionMessageParam[] {
-    const messages: Groq.ChatCompletionMessageParam[] = [];
+  ): ChatCompletionMessageParam[] {
+    const messages: ChatCompletionMessageParam[] = [];
 
     // Add system message if present
     if (request.system) {
@@ -82,7 +88,7 @@ export class GroqProvider implements LLMProvider {
         messages.push({
           role: msg.role,
           content: msg.content,
-        } as Groq.ChatCompletionMessageParam);
+        } as ChatCompletionMessageParam);
       } else {
         // Handle content blocks
         const toolResults = msg.content.filter((c) => c.type === 'tool_result');
@@ -142,7 +148,7 @@ export class GroqProvider implements LLMProvider {
 
   private formatTools(
     tools: NonNullable<CompletionRequest['tools']>
-  ): Groq.ChatCompletionTool[] {
+  ): ChatCompletionTool[] {
     return tools.map((tool) => ({
       type: 'function' as const,
       function: {
@@ -153,7 +159,7 @@ export class GroqProvider implements LLMProvider {
     }));
   }
 
-  private formatResponse(response: Groq.ChatCompletion): CompletionResponse {
+  private formatResponse(response: ChatCompletion): CompletionResponse {
     const choice = response.choices[0];
     const content: ContentBlock[] = [];
 
@@ -184,7 +190,7 @@ export class GroqProvider implements LLMProvider {
   }
 
   private mapStopReason(
-    reason: Groq.ChatCompletion.Choice['finish_reason']
+    reason: ChatCompletion.Choice['finish_reason']
   ): CompletionResponse['stopReason'] {
     switch (reason) {
       case 'stop':

@@ -94,8 +94,8 @@ describe('BuiltInActions', () => {
 
       expect(result.success).toBe(true);
       expect(result.data).toBeDefined();
-      expect(result.data.uptime).toBeDefined();
-      expect(result.data.memory).toBeDefined();
+      expect(result.data!.uptime).toBeDefined();
+      expect(result.data!.memory).toBeDefined();
     });
   });
 
