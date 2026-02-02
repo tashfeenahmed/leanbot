@@ -37,11 +37,6 @@ export class VoiceReplyTool implements Tool {
           type: 'string',
           description: 'The text to speak in the voice message. Keep it concise (under 500 characters) for best results.',
         },
-        voice: {
-          type: 'string',
-          description: 'Optional voice style. Options: af_heart (warm female), af_bella (professional female), am_adam (deep male), am_michael (friendly male). Default: af_heart',
-          enum: ['af_heart', 'af_bella', 'af_nicole', 'af_sarah', 'am_adam', 'am_michael'],
-        },
       },
       required: ['text'],
     },
@@ -54,7 +49,7 @@ export class VoiceReplyTool implements Tool {
 
   async execute(input: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
     const text = input.text as string;
-    const voice = (input.voice as string) || this.defaultVoice;
+    const voice = this.defaultVoice; // Always use configured voice
 
     if (!text || text.trim().length === 0) {
       return {
