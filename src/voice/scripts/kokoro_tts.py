@@ -57,9 +57,21 @@ def main():
         if kokoro_onnx:
             # Using kokoro-onnx (lightweight ONNX version)
             import numpy as np
+            from pathlib import Path
 
-            # Initialize model (downloads automatically on first run)
-            model = ko.Kokoro('kokoro-v1.0.onnx', 'voices-v1.0.bin')
+            # Find model files in standard locations
+            cache_dir = Path.home() / '.cache' / 'kokoro'
+            model_file = cache_dir / 'kokoro-v1.0.onnx'
+            voices_file = cache_dir / 'voices-v1.0.bin'
+
+            # Fall back to current directory if not in cache
+            if not model_file.exists():
+                model_file = Path('kokoro-v1.0.onnx')
+            if not voices_file.exists():
+                voices_file = Path('voices-v1.0.bin')
+
+            # Initialize model
+            model = ko.Kokoro(str(model_file), str(voices_file))
 
             # Generate audio
             samples, sample_rate = model.create(

@@ -552,9 +552,7 @@ export class TelegramChannel {
         return;
       }
 
-      await ctx.reply(`"${transcription.text}"`);
-
-      // Process as regular message
+      // Process transcribed text as regular message (don't echo transcription back)
       const sessionId = await this.getOrCreateSession(userId);
       const result = await this.agent.processMessage(sessionId, transcription.text);
 
