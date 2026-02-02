@@ -123,12 +123,22 @@ export class TelegramChannel {
       const status = await this.voiceManager.isAvailable();
       this.voiceAvailable = status.stt;
 
+      // Check TTS availability for voice replies
+      if (this.enableVoiceReply && !status.tts) {
+        this.logger.warn('TTS not available - voice replies will be disabled');
+        this.enableVoiceReply = false;
+      }
+
       if (this.voiceAvailable) {
-        this.logger.info('Voice support enabled for Telegram');
+        this.logger.info(
+          { stt: status.stt, tts: status.tts, voiceReply: this.enableVoiceReply },
+          'Voice support enabled for Telegram'
+        );
       }
     } catch (error) {
       this.logger.debug({ error: (error as Error).message }, 'Voice init failed');
       this.voiceAvailable = false;
+      this.enableVoiceReply = false;
     }
   }
 
@@ -242,7 +252,20 @@ export class TelegramChannel {
       if (this.enableVoiceReply && result.response.length <= MAX_VOICE_RESPONSE_LENGTH) {
         try {
           const voiceResult = await this.voiceManager.synthesize(result.response);
-          await ctx.replyWithVoice(new InputFile(voiceResult.audio, 'response.ogg'));
+
+          // Map TTS format to file extension (Telegram prefers ogg/opus)
+          const formatExtMap: Record<string, string> = {
+            opus: 'ogg',
+            ogg: 'ogg',
+            mp3: 'mp3',
+            wav: 'wav',
+            aac: 'aac',
+            pcm: 'wav', // PCM needs container
+            aiff: 'aiff',
+          };
+          const ext = formatExtMap[voiceResult.format.toLowerCase()] || voiceResult.format;
+
+          await ctx.replyWithVoice(new InputFile(voiceResult.audio, `response.${ext}`));
         } catch (error) {
           this.logger.debug({ error: (error as Error).message }, 'Failed to send voice reply');
         }

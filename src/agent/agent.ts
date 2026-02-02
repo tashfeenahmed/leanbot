@@ -11,11 +11,22 @@ import type {
 } from '../providers/types.js';
 import type { ToolRegistry, ToolContext } from '../tools/types.js';
 import type { SessionManager } from './session.js';
+import type { SkillRegistry } from '../skills/registry.js';
+import type { Router } from '../routing/router.js';
+import type { CostTracker } from '../routing/cost.js';
+import type { HotCollector } from '../memory/memory.js';
+import type { ContextManager } from '../routing/context.js';
+import { analyzeComplexity } from '../routing/complexity.js';
 
 export interface AgentOptions {
   provider: LLMProvider;
   sessionManager: SessionManager;
   toolRegistry: ToolRegistry;
+  skillRegistry?: SkillRegistry;
+  router?: Router;
+  costTracker?: CostTracker;
+  hotCollector?: HotCollector;
+  contextManager?: ContextManager;
   workspace: string;
   logger: Logger;
   maxIterations: number;
@@ -41,6 +52,11 @@ export class Agent {
   private provider: LLMProvider;
   private sessionManager: SessionManager;
   private toolRegistry: ToolRegistry;
+  private skillRegistry: SkillRegistry | null;
+  private router: Router | null;
+  private costTracker: CostTracker | null;
+  private hotCollector: HotCollector | null;
+  private contextManager: ContextManager | null;
   private workspace: string;
   private logger: Logger;
   private maxIterations: number;
@@ -50,6 +66,11 @@ export class Agent {
     this.provider = options.provider;
     this.sessionManager = options.sessionManager;
     this.toolRegistry = options.toolRegistry;
+    this.skillRegistry = options.skillRegistry || null;
+    this.router = options.router || null;
+    this.costTracker = options.costTracker || null;
+    this.hotCollector = options.hotCollector || null;
+    this.contextManager = options.contextManager || null;
     this.workspace = options.workspace;
     this.logger = options.logger;
     this.maxIterations = options.maxIterations;
@@ -62,11 +83,51 @@ export class Agent {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
+    // Check budget before processing
+    if (this.costTracker) {
+      const budgetCheck = this.costTracker.canMakeRequest();
+      if (!budgetCheck.allowed) {
+        this.logger.warn({ sessionId, reason: budgetCheck.reason }, 'Request blocked by budget');
+        return {
+          response: `I cannot process this request: ${budgetCheck.reason}`,
+          tokenUsage: { inputTokens: 0, outputTokens: 0 },
+          iterationsUsed: 0,
+        };
+      }
+    }
+
+    // Analyze message complexity for provider selection
+    const complexity = analyzeComplexity(userMessage);
+    this.logger.debug(
+      { complexity: complexity.tier, suggestedTier: complexity.suggestedModelTier },
+      'Complexity analysis'
+    );
+
+    // Select provider based on complexity (use router if available, else default)
+    let activeProvider: LLMProvider = this.provider;
+    if (this.router) {
+      const selectedProvider = await this.router.selectProvider(complexity.suggestedModelTier);
+      if (selectedProvider) {
+        activeProvider = selectedProvider;
+        this.logger.debug({ provider: activeProvider.name }, 'Provider selected by router');
+      }
+    }
+
     // Add user message to session
     await this.sessionManager.addMessage(sessionId, {
       role: 'user',
       content: userMessage,
     });
+
+    // Collect user message in memory
+    if (this.hotCollector) {
+      this.hotCollector.collect({
+        content: userMessage,
+        sessionId,
+        source: 'user',
+        tags: ['conversation', 'user-message'],
+      });
+    }
 
     // Build system prompt
     const systemPrompt = await this.buildSystemPrompt();
@@ -79,14 +140,30 @@ export class Agent {
     let totalOutputTokens = 0;
     let iterations = 0;
     let finalResponse = '';
+    let lastModel = '';
 
     // Agent loop
     while (iterations < this.maxIterations) {
       iterations++;
 
+      // Check budget before each iteration
+      if (this.costTracker) {
+        const budgetCheck = this.costTracker.canMakeRequest();
+        if (!budgetCheck.allowed) {
+          this.logger.warn({ sessionId, iteration: iterations }, 'Budget exceeded mid-conversation');
+          finalResponse = `I had to stop processing: ${budgetCheck.reason}`;
+          break;
+        }
+      }
+
       // Get current messages from session
       const currentSession = await this.sessionManager.getSession(sessionId);
-      const messages = currentSession?.messages || [];
+      const rawMessages = currentSession?.messages || [];
+
+      // Process messages through context manager (compression, deduplication)
+      const messages = this.contextManager
+        ? this.contextManager.buildContextMessages(rawMessages)
+        : rawMessages;
 
       // Build completion request
       const request: CompletionRequest = {
@@ -99,7 +176,8 @@ export class Agent {
       this.logger.debug({ iteration: iterations, messageCount: messages.length }, 'Agent iteration');
 
       // Call LLM
-      const response = await this.provider.complete(request);
+      const response = await activeProvider.complete(request);
+      lastModel = response.model;
 
       // Track token usage
       totalInputTokens += response.usage.inputTokens;
@@ -147,8 +225,24 @@ export class Agent {
     const tokenUsage = { inputTokens: totalInputTokens, outputTokens: totalOutputTokens };
     await this.sessionManager.recordTokenUsage(sessionId, tokenUsage);
 
+    // Record usage in cost tracker
+    if (this.costTracker && lastModel) {
+      this.costTracker.recordUsage({
+        model: lastModel,
+        inputTokens: totalInputTokens,
+        outputTokens: totalOutputTokens,
+        provider: activeProvider.name,
+        sessionId,
+      });
+      const budget = this.costTracker.getBudgetStatus();
+      this.logger.debug(
+        { dailySpend: budget.dailySpend.toFixed(4), monthlySpend: budget.monthlySpend.toFixed(4) },
+        'Cost recorded'
+      );
+    }
+
     this.logger.info(
-      { sessionId, iterations, inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
+      { sessionId, iterations, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, provider: activeProvider.name },
       'Message processed'
     );
 
@@ -164,6 +258,14 @@ export class Agent {
 
     // Add workspace context
     prompt += `\n\nWorkspace: ${this.workspace}`;
+
+    // Add skills prompt if registry is available
+    if (this.skillRegistry) {
+      const skillPrompt = this.skillRegistry.generateSkillPrompt();
+      if (skillPrompt) {
+        prompt += `\n\n${skillPrompt}`;
+      }
+    }
 
     // Load SOUL.md if present
     const soulPath = path.join(this.workspace, 'SOUL.md');
@@ -225,6 +327,17 @@ export class Agent {
           content: result.success ? result.output : `Error: ${result.error}`,
           is_error: !result.success,
         });
+
+        // Collect tool execution in memory
+        if (this.hotCollector && result.success) {
+          this.hotCollector.collect({
+            content: `Tool ${toolUse.name} executed: ${result.output.slice(0, 500)}${result.output.length > 500 ? '...' : ''}`,
+            sessionId,
+            source: `tool:${toolUse.name}`,
+            tags: ['tool-execution', toolUse.name],
+            metadata: { toolInput: toolUse.input },
+          });
+        }
       } catch (error) {
         const err = error as Error;
         this.logger.error({ toolName: toolUse.name, error: err.message }, 'Tool execution failed');

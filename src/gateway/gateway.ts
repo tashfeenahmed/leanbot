@@ -6,6 +6,11 @@ import { createDefaultToolRegistry, type ToolRegistry } from '../tools/index.js'
 import { SessionManager } from '../agent/session.js';
 import { Agent } from '../agent/agent.js';
 import { TelegramChannel } from '../channels/telegram.js';
+import { createSkillRegistry, type SkillRegistry } from '../skills/registry.js';
+import { Router } from '../routing/router.js';
+import { CostTracker } from '../routing/cost.js';
+import { MemoryStore, HotCollector, BackgroundGardener, HybridSearch } from '../memory/index.js';
+import { ContextManager } from '../routing/context.js';
 
 export interface GatewayOptions {
   config: Config;
@@ -19,6 +24,14 @@ export class Gateway {
   private providerRegistry: ProviderRegistry | null = null;
   private toolRegistry: ToolRegistry | null = null;
   private sessionManager: SessionManager | null = null;
+  private skillRegistry: SkillRegistry | null = null;
+  private router: Router | null = null;
+  private costTracker: CostTracker | null = null;
+  private memoryStore: MemoryStore | null = null;
+  private hotCollector: HotCollector | null = null;
+  private backgroundGardener: BackgroundGardener | null = null;
+  private hybridSearch: HybridSearch | null = null;
+  private contextManager: ContextManager | null = null;
   private agent: Agent | null = null;
   private telegramChannel: TelegramChannel | null = null;
 
@@ -41,8 +54,52 @@ export class Gateway {
     this.providerRegistry = new ProviderRegistry();
     this.initializeProviders();
 
-    // Initialize tool registry
-    this.toolRegistry = await createDefaultToolRegistry();
+    // Initialize router with providers
+    this.router = new Router({});
+    this.registerProvidersWithRouter();
+
+    // Initialize cost tracker
+    this.costTracker = new CostTracker({
+      dailyBudget: this.config.cost.dailyBudget,
+      monthlyBudget: this.config.cost.monthlyBudget,
+      warningThreshold: this.config.cost.warningThreshold,
+    });
+    this.logger.debug('Cost tracker initialized');
+
+    // Initialize memory system
+    this.memoryStore = new MemoryStore();
+    this.hotCollector = new HotCollector({ store: this.memoryStore });
+    this.hybridSearch = new HybridSearch({ store: this.memoryStore });
+    this.backgroundGardener = new BackgroundGardener({
+      store: this.memoryStore,
+      logger: this.logger,
+      interval: 60000, // 1 minute
+    });
+    this.logger.debug('Memory system initialized');
+
+    // Initialize context manager
+    this.contextManager = new ContextManager({
+      hotWindowSize: this.config.context.hotWindowSize,
+      maxContextTokens: this.config.context.maxContextTokens,
+      compressionThreshold: this.config.context.compressionThreshold,
+      maxToolOutputBytes: this.config.context.maxToolOutputBytes,
+    });
+    this.logger.debug('Context manager initialized');
+
+    // Initialize skill registry
+    this.skillRegistry = createSkillRegistry(this.config.agent.workspace, this.logger);
+    await this.skillRegistry.initialize();
+    this.logger.debug(
+      { skills: this.skillRegistry.getAvailableSkills().map((s) => s.name) },
+      'Skills loaded'
+    );
+
+    // Initialize tool registry with skills and memory
+    this.toolRegistry = await createDefaultToolRegistry({
+      skillRegistry: this.skillRegistry,
+      memoryStore: this.memoryStore,
+      hybridSearch: this.hybridSearch,
+    });
     this.logger.debug({ tools: this.toolRegistry.getAllTools().map((t) => t.name) }, 'Tools registered');
 
     // Initialize session manager
@@ -60,6 +117,11 @@ export class Gateway {
       provider,
       sessionManager: this.sessionManager,
       toolRegistry: this.toolRegistry,
+      skillRegistry: this.skillRegistry,
+      router: this.router,
+      costTracker: this.costTracker,
+      hotCollector: this.hotCollector,
+      contextManager: this.contextManager,
       workspace: this.config.agent.workspace,
       logger: this.logger,
       maxIterations: this.config.agent.maxIterations,
@@ -85,6 +147,16 @@ export class Gateway {
     }
   }
 
+  private registerProvidersWithRouter(): void {
+    if (!this.router || !this.providerRegistry) return;
+
+    // Register all available providers with the router for smart routing
+    for (const provider of this.providerRegistry.getAvailableProviders()) {
+      this.router.registerProvider(provider);
+      this.logger.debug({ provider: provider.name }, 'Provider registered with router');
+    }
+  }
+
   async start(): Promise<void> {
     if (this.isRunning) {
       return;
@@ -95,6 +167,11 @@ export class Gateway {
     }
 
     this.logger.info('Starting gateway...');
+
+    // Start background gardener for memory maintenance
+    if (this.backgroundGardener) {
+      this.backgroundGardener.start();
+    }
 
     // Start Telegram channel if enabled
     if (this.config.channels.telegram.enabled && this.config.channels.telegram.botToken) {
@@ -117,6 +194,11 @@ export class Gateway {
     }
 
     this.logger.info('Stopping gateway...');
+
+    // Stop background gardener
+    if (this.backgroundGardener) {
+      this.backgroundGardener.stop();
+    }
 
     // Stop Telegram channel
     if (this.telegramChannel) {
@@ -151,6 +233,13 @@ export class Gateway {
       throw new Error('Gateway not initialized');
     }
     return this.agent;
+  }
+
+  getSkillRegistry(): SkillRegistry {
+    if (!this.skillRegistry) {
+      throw new Error('Gateway not initialized');
+    }
+    return this.skillRegistry;
   }
 
   isGatewayRunning(): boolean {

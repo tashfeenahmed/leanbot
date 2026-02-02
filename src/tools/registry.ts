@@ -1,6 +1,7 @@
 import type { Tool, ToolRegistry } from './types.js';
 import type { ToolDefinition } from '../providers/types.js';
 import type { MemoryStore, HybridSearch } from '../memory/index.js';
+import type { SkillRegistry } from '../skills/registry.js';
 
 export class ToolRegistryImpl implements ToolRegistry {
   private tools: Map<string, Tool> = new Map();
@@ -44,6 +45,10 @@ export interface ToolRegistryOptions {
   hybridSearch?: HybridSearch;
   /** Whether to include memory tools (default: true if memoryStore provided) */
   includeMemoryTools?: boolean;
+  /** Skill registry for skill tool */
+  skillRegistry?: SkillRegistry;
+  /** Whether to include skill tool (default: true if skillRegistry provided) */
+  includeSkillTool?: boolean;
 }
 
 /**
@@ -76,6 +81,14 @@ export async function createDefaultToolRegistry(
 
     registry.registerTool(new MemorySearchTool());
     registry.registerTool(new MemoryGetTool());
+  }
+
+  // Add skill tool if registry is provided
+  const includeSkill = options.includeSkillTool ?? !!options.skillRegistry;
+  if (includeSkill && options.skillRegistry) {
+    const { SkillTool, initializeSkillTool } = await import('./skill.js');
+    initializeSkillTool(options.skillRegistry);
+    registry.registerTool(new SkillTool());
   }
 
   return registry;
