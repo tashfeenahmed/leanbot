@@ -24,9 +24,45 @@ interface SessionEntry {
   data: unknown;
 }
 
+/**
+ * Simple async mutex for session locking
+ */
+class SessionLock {
+  private locks: Map<string, Promise<void>> = new Map();
+
+  async acquire(sessionId: string): Promise<() => void> {
+    // Wait for any existing lock
+    const existingLock = this.locks.get(sessionId);
+    if (existingLock) {
+      await existingLock;
+    }
+
+    // Create new lock
+    let release: () => void;
+    const lockPromise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    this.locks.set(sessionId, lockPromise);
+
+    // Return release function
+    return () => {
+      if (this.locks.get(sessionId) === lockPromise) {
+        this.locks.delete(sessionId);
+      }
+      release!();
+    };
+  }
+
+  isLocked(sessionId: string): boolean {
+    return this.locks.has(sessionId);
+  }
+}
+
 export class SessionManager {
   private sessionsDir: string;
   private cache: Map<string, Session> = new Map();
+  private lock: SessionLock = new SessionLock();
 
   constructor(sessionsDir: string) {
     this.sessionsDir = sessionsDir;
@@ -60,21 +96,26 @@ export class SessionManager {
   }
 
   async addMessage(sessionId: string, message: Message): Promise<void> {
-    const session = await this.getSession(sessionId);
-    if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
+    const release = await this.lock.acquire(sessionId);
+    try {
+      const session = await this.getSession(sessionId);
+      if (!session) {
+        throw new Error(`Session not found: ${sessionId}`);
+      }
+
+      session.messages.push(message);
+      session.updatedAt = new Date();
+
+      await this.appendEntry(sessionId, {
+        type: 'message',
+        timestamp: session.updatedAt.toISOString(),
+        data: message,
+      });
+
+      this.cache.set(sessionId, session);
+    } finally {
+      release();
     }
-
-    session.messages.push(message);
-    session.updatedAt = new Date();
-
-    await this.appendEntry(sessionId, {
-      type: 'message',
-      timestamp: session.updatedAt.toISOString(),
-      data: message,
-    });
-
-    this.cache.set(sessionId, session);
   }
 
   async getSession(sessionId: string): Promise<Session | undefined> {
@@ -99,14 +140,26 @@ export class SessionManager {
   }
 
   async deleteSession(sessionId: string): Promise<boolean> {
-    const filePath = this.getFilePath(sessionId);
+    const release = await this.lock.acquire(sessionId);
     try {
-      await fs.unlink(filePath);
-      this.cache.delete(sessionId);
-      return true;
-    } catch {
-      return false;
+      const filePath = this.getFilePath(sessionId);
+      try {
+        await fs.unlink(filePath);
+        this.cache.delete(sessionId);
+        return true;
+      } catch {
+        return false;
+      }
+    } finally {
+      release();
     }
+  }
+
+  /**
+   * Check if a session is currently locked (useful for debugging)
+   */
+  isSessionLocked(sessionId: string): boolean {
+    return this.lock.isLocked(sessionId);
   }
 
   async listSessions(): Promise<{ id: string; createdAt: Date }[]> {
@@ -131,44 +184,54 @@ export class SessionManager {
   }
 
   async updateMetadata(sessionId: string, metadata: Partial<SessionMetadata>): Promise<void> {
-    const session = await this.getSession(sessionId);
-    if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
+    const release = await this.lock.acquire(sessionId);
+    try {
+      const session = await this.getSession(sessionId);
+      if (!session) {
+        throw new Error(`Session not found: ${sessionId}`);
+      }
+
+      session.metadata = { ...session.metadata, ...metadata };
+      session.updatedAt = new Date();
+
+      await this.appendEntry(sessionId, {
+        type: 'metadata',
+        timestamp: session.updatedAt.toISOString(),
+        data: metadata,
+      });
+
+      this.cache.set(sessionId, session);
+    } finally {
+      release();
     }
-
-    session.metadata = { ...session.metadata, ...metadata };
-    session.updatedAt = new Date();
-
-    await this.appendEntry(sessionId, {
-      type: 'metadata',
-      timestamp: session.updatedAt.toISOString(),
-      data: metadata,
-    });
-
-    this.cache.set(sessionId, session);
   }
 
   async recordTokenUsage(sessionId: string, usage: TokenUsage): Promise<void> {
-    const session = await this.getSession(sessionId);
-    if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
+    const release = await this.lock.acquire(sessionId);
+    try {
+      const session = await this.getSession(sessionId);
+      if (!session) {
+        throw new Error(`Session not found: ${sessionId}`);
+      }
+
+      if (!session.tokenUsage) {
+        session.tokenUsage = { inputTokens: 0, outputTokens: 0 };
+      }
+
+      session.tokenUsage.inputTokens += usage.inputTokens;
+      session.tokenUsage.outputTokens += usage.outputTokens;
+      session.updatedAt = new Date();
+
+      await this.appendEntry(sessionId, {
+        type: 'token_usage',
+        timestamp: session.updatedAt.toISOString(),
+        data: usage,
+      });
+
+      this.cache.set(sessionId, session);
+    } finally {
+      release();
     }
-
-    if (!session.tokenUsage) {
-      session.tokenUsage = { inputTokens: 0, outputTokens: 0 };
-    }
-
-    session.tokenUsage.inputTokens += usage.inputTokens;
-    session.tokenUsage.outputTokens += usage.outputTokens;
-    session.updatedAt = new Date();
-
-    await this.appendEntry(sessionId, {
-      type: 'token_usage',
-      timestamp: session.updatedAt.toISOString(),
-      data: usage,
-    });
-
-    this.cache.set(sessionId, session);
   }
 
   private getFilePath(sessionId: string): string {

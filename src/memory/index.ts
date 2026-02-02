@@ -9,6 +9,7 @@ export {
   type MemoryEntry,
   type MemoryType,
   type PartialMemoryEntry,
+  type MemoryStoreOptions,
   type CollectOptions,
   type HotCollectorOptions,
   type BackgroundGardenerOptions,

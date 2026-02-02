@@ -51,6 +51,11 @@ const createMockConfig = (testDir: string, overrides: Record<string, unknown> = 
     maxToolOutputBytes: 30000,
     ...((overrides.context as Record<string, unknown>) || {}),
   },
+  memory: {
+    filePath: 'memories.jsonl',
+    persist: false, // Disable persistence in tests
+    ...((overrides.memory as Record<string, unknown>) || {}),
+  },
   gateway: {
     port: 3000,
     host: '127.0.0.1',

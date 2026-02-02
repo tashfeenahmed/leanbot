@@ -3,6 +3,8 @@
  * Hot collector, background gardener, and hybrid search
  */
 
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import type { Logger } from 'pino';
 import { nanoid } from 'nanoid';
 
@@ -21,11 +23,96 @@ export interface MemoryEntry {
 
 export type PartialMemoryEntry = Omit<MemoryEntry, 'id'> & { id?: string };
 
+export interface MemoryStoreOptions {
+  /** Path to JSONL file for persistence (optional) */
+  filePath?: string;
+  /** Auto-save on every add/update/delete (default: true if filePath provided) */
+  autoSave?: boolean;
+}
+
 /**
- * In-memory store for memories
+ * In-memory store for memories with optional disk persistence
  */
 export class MemoryStore {
   private memories: Map<string, MemoryEntry> = new Map();
+  private filePath: string | null;
+  private autoSave: boolean;
+  private saveQueue: Promise<void> = Promise.resolve();
+
+  constructor(options: MemoryStoreOptions = {}) {
+    this.filePath = options.filePath || null;
+    this.autoSave = options.autoSave ?? !!options.filePath;
+  }
+
+  /**
+   * Load memories from disk
+   */
+  async load(): Promise<void> {
+    if (!this.filePath) return;
+
+    try {
+      await fs.access(this.filePath);
+    } catch {
+      // File doesn't exist yet, that's fine
+      return;
+    }
+
+    try {
+      const content = await fs.readFile(this.filePath, 'utf-8');
+      const lines = content.trim().split('\n');
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+
+        try {
+          const entry = JSON.parse(line) as MemoryEntry;
+          // Restore Date objects
+          entry.timestamp = new Date(entry.timestamp);
+          this.memories.set(entry.id, entry);
+        } catch {
+          // Skip invalid lines
+        }
+      }
+    } catch {
+      // File read error, start fresh
+    }
+  }
+
+  /**
+   * Save all memories to disk (full rewrite)
+   */
+  async save(): Promise<void> {
+    if (!this.filePath) return;
+
+    // Queue saves to prevent concurrent writes
+    this.saveQueue = this.saveQueue.then(async () => {
+      const dir = path.dirname(this.filePath!);
+      await fs.mkdir(dir, { recursive: true });
+
+      const lines = Array.from(this.memories.values())
+        .map((m) => JSON.stringify(m))
+        .join('\n');
+
+      await fs.writeFile(this.filePath!, lines + '\n', 'utf-8');
+    });
+
+    await this.saveQueue;
+  }
+
+  /**
+   * Append a single entry to disk (more efficient for adds)
+   */
+  private async appendEntry(entry: MemoryEntry): Promise<void> {
+    if (!this.filePath || !this.autoSave) return;
+
+    this.saveQueue = this.saveQueue.then(async () => {
+      const dir = path.dirname(this.filePath!);
+      await fs.mkdir(dir, { recursive: true });
+      await fs.appendFile(this.filePath!, JSON.stringify(entry) + '\n', 'utf-8');
+    });
+
+    await this.saveQueue;
+  }
 
   add(entry: PartialMemoryEntry): MemoryEntry {
     const id = entry.id || nanoid();
@@ -34,6 +121,13 @@ export class MemoryStore {
       id,
     };
     this.memories.set(id, memory);
+
+    // Append to disk if auto-save enabled
+    if (this.autoSave && this.filePath) {
+      // Fire and forget - don't block on disk write
+      this.appendEntry(memory).catch(() => {});
+    }
+
     return memory;
   }
 
@@ -42,7 +136,14 @@ export class MemoryStore {
   }
 
   delete(id: string): boolean {
-    return this.memories.delete(id);
+    const result = this.memories.delete(id);
+
+    // Save full state on delete (can't append a delete)
+    if (result && this.autoSave && this.filePath) {
+      this.save().catch(() => {});
+    }
+
+    return result;
   }
 
   update(id: string, updates: Partial<MemoryEntry>): MemoryEntry | undefined {
@@ -51,6 +152,12 @@ export class MemoryStore {
 
     const updated = { ...existing, ...updates, id };
     this.memories.set(id, updated);
+
+    // Save full state on update (can't append an update)
+    if (this.autoSave && this.filePath) {
+      this.save().catch(() => {});
+    }
+
     return updated;
   }
 
@@ -116,6 +223,25 @@ export class MemoryStore {
 
   clear(): void {
     this.memories.clear();
+
+    // Clear the file too
+    if (this.autoSave && this.filePath) {
+      this.save().catch(() => {});
+    }
+  }
+
+  /**
+   * Get the configured file path
+   */
+  getFilePath(): string | null {
+    return this.filePath;
+  }
+
+  /**
+   * Get memory count
+   */
+  size(): number {
+    return this.memories.size;
   }
 }
 

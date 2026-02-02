@@ -48,9 +48,13 @@ export {
 } from './parser.js';
 export type { ParsedSkill } from './parser.js';
 
-export { SkillLoader, createSkillLoader } from './loader.js';
+export { SkillLoader, createSkillLoader, checkGates } from './loader.js';
 export { SkillRegistry, createSkillRegistry } from './registry.js';
 export type { SkillHandler } from './registry.js';
+
+// Skill package manager for downloading from registries
+export { SkillPackageManager, createSkillPackageManager } from './clawhub.js';
+export type { SkillPackageManagerOptions, SkillPackage, InstallResult } from './clawhub.js';
 
 // Native SDK for programmatic skill definition
 export {

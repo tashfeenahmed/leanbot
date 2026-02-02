@@ -66,8 +66,15 @@ export class Gateway {
     });
     this.logger.debug('Cost tracker initialized');
 
-    // Initialize memory system
-    this.memoryStore = new MemoryStore();
+    // Initialize memory system with persistence
+    const memoryFilePath = this.config.memory.persist
+      ? path.join(this.config.agent.workspace, this.config.memory.filePath)
+      : undefined;
+    this.memoryStore = new MemoryStore({ filePath: memoryFilePath });
+    if (memoryFilePath) {
+      await this.memoryStore.load();
+      this.logger.debug({ filePath: memoryFilePath, count: this.memoryStore.size() }, 'Memories loaded from disk');
+    }
     this.hotCollector = new HotCollector({ store: this.memoryStore });
     this.hybridSearch = new HybridSearch({ store: this.memoryStore });
     this.backgroundGardener = new BackgroundGardener({

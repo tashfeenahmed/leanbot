@@ -87,6 +87,14 @@ const contextSchema = z.object({
   maxToolOutputBytes: z.number().int().positive().default(30000),
 });
 
+// Memory configuration schema
+const memorySchema = z.object({
+  /** Path to memory file for persistence (relative to workspace) */
+  filePath: z.string().default('memories.jsonl'),
+  /** Enable memory persistence (default: true) */
+  persist: z.boolean().default(true),
+});
+
 // Gateway configuration schema
 const gatewaySchema = z.object({
   port: z.number().int().positive().default(3000),
@@ -110,6 +118,7 @@ export const configSchema = z.object({
   routing: routingSchema.default({ providerOrder: ['anthropic', 'openai', 'groq', 'ollama'], enableComplexityAnalysis: true }),
   cost: costSchema.default({ warningThreshold: 0.75 }),
   context: contextSchema.default({ hotWindowSize: 5, maxContextTokens: 128000, compressionThreshold: 0.7, maxToolOutputBytes: 30000 }),
+  memory: memorySchema.default({ filePath: 'memories.jsonl', persist: true }),
   gateway: gatewaySchema.default({ port: 3000, host: '127.0.0.1' }),
   tailscale: tailscaleSchema.default({ mode: 'off', resetOnExit: true }),
 });
@@ -123,6 +132,7 @@ export type LoggingConfig = z.infer<typeof loggingSchema>;
 export type RoutingConfig = z.infer<typeof routingSchema>;
 export type CostConfig = z.infer<typeof costSchema>;
 export type ContextConfig = z.infer<typeof contextSchema>;
+export type MemoryConfig = z.infer<typeof memorySchema>;
 export type GatewayConfig = z.infer<typeof gatewaySchema>;
 export type TailscaleConfig = z.infer<typeof tailscaleSchema>;
 
