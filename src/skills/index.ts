@@ -51,3 +51,18 @@ export type { ParsedSkill } from './parser.js';
 export { SkillLoader, createSkillLoader } from './loader.js';
 export { SkillRegistry, createSkillRegistry } from './registry.js';
 export type { SkillHandler } from './registry.js';
+
+// Native SDK for programmatic skill definition
+export {
+  defineSkill,
+  createSkill,
+  SkillBuilder,
+  SDKSkillRegistry,
+  sdkSkillRegistry,
+} from './sdk.js';
+export type {
+  SkillHandler as SDKSkillHandler,
+  SkillDefinition as SDKSkillDefinition,
+  SkillExecutionContext,
+  SkillBuilderOptions,
+} from './sdk.js';

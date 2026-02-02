@@ -484,3 +484,301 @@ export class NotificationManager {
     });
   }
 }
+
+/**
+ * Degradation tier for providers
+ */
+export type DegradationTier = 'cloud_premium' | 'cloud_budget' | 'local' | 'offline';
+
+/**
+ * Provider tier assignment
+ */
+export interface ProviderTierConfig {
+  name: string;
+  tier: DegradationTier;
+}
+
+/**
+ * Degradation ladder options
+ */
+export interface DegradationLadderOptions {
+  providers: Map<string, LLMProvider>;
+  tiers: ProviderTierConfig[];
+  logger: Logger;
+  healthWindowMs?: number;
+  failureThreshold?: number;
+  offlineMessage?: string;
+}
+
+/**
+ * Current degradation state
+ */
+export interface DegradationState {
+  currentTier: DegradationTier;
+  availableTiers: DegradationTier[];
+  degradedSince?: Date;
+  lastSuccessfulTier?: DegradationTier;
+  message?: string;
+}
+
+/**
+ * Degradation execution result
+ */
+export interface DegradationResult {
+  success: boolean;
+  response?: CompletionResponse;
+  provider?: string;
+  tier?: DegradationTier;
+  error?: string;
+  attempts: number;
+  degraded: boolean;
+}
+
+/**
+ * Degradation Ladder
+ *
+ * Implements graceful fallback through provider tiers:
+ * cloud_premium → cloud_budget → local → offline (degraded response)
+ *
+ * Each tier can have multiple providers which are tried in order.
+ * If all providers in a tier fail, the ladder moves to the next tier.
+ * The "offline" tier provides a degraded response message.
+ */
+export class DegradationLadder {
+  private providers: Map<string, LLMProvider>;
+  private tierOrder: DegradationTier[] = ['cloud_premium', 'cloud_budget', 'local', 'offline'];
+  private tierProviders: Map<DegradationTier, string[]>;
+  private logger: Logger;
+  private health: ProviderHealth;
+  private currentTier: DegradationTier = 'cloud_premium';
+  private degradedSince?: Date;
+  private lastSuccessfulTier?: DegradationTier;
+  private offlineMessage: string;
+
+  constructor(options: DegradationLadderOptions) {
+    this.providers = options.providers;
+    this.logger = options.logger.child({ component: 'degradation-ladder' });
+    this.health = new ProviderHealth({
+      windowMs: options.healthWindowMs ?? 300000, // 5 minutes
+      failureThreshold: options.failureThreshold ?? 3,
+    });
+    this.offlineMessage =
+      options.offlineMessage ||
+      "I'm currently operating in offline mode with limited capabilities. " +
+        'Please try again later when cloud services are available.';
+
+    // Organize providers by tier
+    this.tierProviders = new Map();
+    for (const tier of this.tierOrder) {
+      this.tierProviders.set(tier, []);
+    }
+
+    for (const config of options.tiers) {
+      const tierList = this.tierProviders.get(config.tier);
+      if (tierList) {
+        tierList.push(config.name);
+      }
+    }
+  }
+
+  /**
+   * Execute request with graceful degradation through tiers
+   */
+  async execute(request: CompletionRequest): Promise<DegradationResult> {
+    let attempts = 0;
+    const errors: string[] = [];
+
+    // Try each tier in order
+    for (const tier of this.tierOrder) {
+      // Handle offline tier (degraded response)
+      if (tier === 'offline') {
+        this.enterDegradedMode();
+
+        return {
+          success: true,
+          response: {
+            text: this.offlineMessage,
+            tokenUsage: { inputTokens: 0, outputTokens: 0 },
+          },
+          tier: 'offline',
+          attempts,
+          degraded: true,
+        };
+      }
+
+      const tierProviders = this.tierProviders.get(tier) || [];
+
+      for (const providerName of tierProviders) {
+        // Skip unhealthy providers
+        if (!this.health.isHealthy(providerName)) {
+          this.logger.debug({ provider: providerName, tier }, 'Skipping unhealthy provider');
+          continue;
+        }
+
+        const provider = this.providers.get(providerName);
+        if (!provider || !provider.isAvailable()) {
+          continue;
+        }
+
+        attempts++;
+
+        try {
+          this.logger.debug({ provider: providerName, tier }, 'Trying provider');
+
+          const response = await provider.complete(request);
+
+          this.health.recordSuccess(providerName);
+          this.exitDegradedMode(tier);
+
+          this.logger.info(
+            { provider: providerName, tier, attempts },
+            'Request succeeded'
+          );
+
+          return {
+            success: true,
+            response,
+            provider: providerName,
+            tier,
+            attempts,
+            degraded: false,
+          };
+        } catch (error) {
+          const err = error as Error;
+          errors.push(`${providerName}: ${err.message}`);
+
+          this.health.recordFailure(providerName);
+
+          this.logger.warn(
+            { provider: providerName, tier, error: err.message },
+            'Provider failed, trying next'
+          );
+        }
+      }
+
+      // All providers in this tier failed, move to next tier
+      this.logger.info({ tier }, 'Tier exhausted, moving to next tier');
+    }
+
+    // Should not reach here due to offline tier
+    this.logger.error({ attempts, errors }, 'All providers failed (unexpected)');
+
+    return {
+      success: false,
+      error: `All providers failed: ${errors.join('; ')}`,
+      attempts,
+      degraded: true,
+    };
+  }
+
+  /**
+   * Enter degraded mode (offline)
+   */
+  private enterDegradedMode(): void {
+    if (!this.degradedSince) {
+      this.degradedSince = new Date();
+      this.logger.warn('Entering degraded mode - all providers exhausted');
+    }
+    this.currentTier = 'offline';
+  }
+
+  /**
+   * Exit degraded mode when a provider succeeds
+   */
+  private exitDegradedMode(tier: DegradationTier): void {
+    if (this.degradedSince) {
+      this.logger.info(
+        { tier, degradedDuration: Date.now() - this.degradedSince.getTime() },
+        'Exiting degraded mode'
+      );
+      this.degradedSince = undefined;
+    }
+    this.currentTier = tier;
+    this.lastSuccessfulTier = tier;
+  }
+
+  /**
+   * Get current degradation state
+   */
+  getState(): DegradationState {
+    const availableTiers: DegradationTier[] = [];
+
+    for (const tier of this.tierOrder) {
+      if (tier === 'offline') continue;
+
+      const tierProviders = this.tierProviders.get(tier) || [];
+      const hasHealthy = tierProviders.some((p) => {
+        const provider = this.providers.get(p);
+        return provider?.isAvailable() && this.health.isHealthy(p);
+      });
+
+      if (hasHealthy) {
+        availableTiers.push(tier);
+      }
+    }
+
+    let message: string | undefined;
+    if (this.currentTier === 'offline') {
+      message = 'All providers are currently unavailable. Operating in degraded mode.';
+    } else if (this.currentTier === 'local') {
+      message = 'Cloud providers unavailable. Using local models.';
+    } else if (this.currentTier === 'cloud_budget') {
+      message = 'Premium providers unavailable. Using budget cloud providers.';
+    }
+
+    return {
+      currentTier: this.currentTier,
+      availableTiers,
+      degradedSince: this.degradedSince,
+      lastSuccessfulTier: this.lastSuccessfulTier,
+      message,
+    };
+  }
+
+  /**
+   * Get health status for all providers
+   */
+  getHealthStatus(): Map<string, HealthStats & { tier: DegradationTier }> {
+    const status = new Map<string, HealthStats & { tier: DegradationTier }>();
+
+    for (const [tier, providers] of this.tierProviders) {
+      if (tier === 'offline') continue;
+
+      for (const name of providers) {
+        const stats = this.health.getStats(name);
+        status.set(name, { ...stats, tier });
+      }
+    }
+
+    return status;
+  }
+
+  /**
+   * Check if currently in degraded mode
+   */
+  isDegraded(): boolean {
+    return this.currentTier === 'offline';
+  }
+
+  /**
+   * Reset health tracking for a provider
+   */
+  resetProvider(providerName: string): void {
+    this.health.recordSuccess(providerName);
+    this.logger.info({ provider: providerName }, 'Provider health reset');
+  }
+
+  /**
+   * Reset all health tracking
+   */
+  resetAll(): void {
+    for (const [, providers] of this.tierProviders) {
+      for (const name of providers) {
+        this.health.recordSuccess(name);
+      }
+    }
+    this.degradedSince = undefined;
+    this.currentTier = 'cloud_premium';
+    this.logger.info('All provider health reset');
+  }
+}

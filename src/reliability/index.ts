@@ -4,6 +4,7 @@ export {
   BudgetGuard,
   TaskQueue,
   NotificationManager,
+  DegradationLadder,
   type ProviderHealthOptions,
   type HealthStats,
   type FallbackChainOptions,
@@ -19,4 +20,9 @@ export {
   type NotifyFunction,
   type NotificationManagerOptions,
   type NotifyParams,
+  type DegradationTier,
+  type ProviderTierConfig,
+  type DegradationLadderOptions,
+  type DegradationState,
+  type DegradationResult,
 } from './reliability.js';

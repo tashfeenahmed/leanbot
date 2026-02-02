@@ -56,3 +56,6 @@ export { SignalChannel, type SignalChannelOptions } from './signal.js';
 
 // Matrix
 export { MatrixChannel, type MatrixChannelOptions } from './matrix.js';
+
+// API (REST/WebSocket)
+export { ApiChannel, type ApiChannelConfig } from './api.js';

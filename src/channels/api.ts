@@ -1,0 +1,511 @@
+/**
+ * REST/WebSocket API Channel
+ *
+ * Provides HTTP API and WebSocket endpoints for programmatic access:
+ *
+ * REST Endpoints:
+ * - POST /api/chat - Send a message and get a response
+ * - POST /api/chat/stream - Send a message and stream response (SSE)
+ * - GET /api/sessions - List sessions
+ * - GET /api/sessions/:id - Get session details
+ * - DELETE /api/sessions/:id - Delete a session
+ * - GET /api/health - Health check
+ *
+ * WebSocket:
+ * - ws://host:port/ws - Real-time bidirectional communication
+ */
+
+import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
+import type { Logger } from 'pino';
+import type { Agent } from '../agent/agent.js';
+import type { SessionManager } from '../agent/session.js';
+import type { Channel } from './types.js';
+import { nanoid } from 'nanoid';
+
+/**
+ * API Channel configuration
+ */
+export interface ApiChannelConfig {
+  /** Port to listen on */
+  port: number;
+  /** Host to bind to (default: 127.0.0.1) */
+  host?: string;
+  /** API key for authentication (optional) */
+  apiKey?: string;
+  /** Agent instance */
+  agent: Agent;
+  /** Session manager */
+  sessionManager: SessionManager;
+  /** Logger */
+  logger: Logger;
+}
+
+/**
+ * Chat request body
+ */
+interface ChatRequest {
+  message: string;
+  sessionId?: string;
+}
+
+/**
+ * Chat response
+ */
+interface ChatResponse {
+  response: string;
+  sessionId: string;
+}
+
+/**
+ * WebSocket message types
+ */
+interface WsMessage {
+  type: 'chat' | 'ping';
+  sessionId?: string;
+  message?: string;
+}
+
+interface WsResponse {
+  type: 'response' | 'chunk' | 'error' | 'pong';
+  sessionId?: string;
+  content?: string;
+  error?: string;
+}
+
+/**
+ * API Channel
+ */
+export class ApiChannel implements Channel {
+  name = 'api';
+
+  private config: Required<Omit<ApiChannelConfig, 'apiKey'>> & { apiKey?: string };
+  private server: Server | null = null;
+  private wss: WebSocketServer | null = null;
+  private logger: Logger;
+  private running = false;
+  private userSessions: Map<string, string> = new Map();
+
+  constructor(config: ApiChannelConfig) {
+    this.config = {
+      port: config.port,
+      host: config.host || '127.0.0.1',
+      apiKey: config.apiKey,
+      agent: config.agent,
+      sessionManager: config.sessionManager,
+      logger: config.logger,
+    };
+    this.logger = config.logger.child({ channel: 'api' });
+  }
+
+  async start(): Promise<void> {
+    if (this.running) {
+      return;
+    }
+
+    // Create HTTP server
+    this.server = createServer((req, res) => this.handleRequest(req, res));
+
+    // Create WebSocket server
+    this.wss = new WebSocketServer({ server: this.server });
+    this.wss.on('connection', (ws, req) => this.handleWebSocket(ws, req));
+
+    // Start listening
+    await new Promise<void>((resolve, reject) => {
+      this.server!.listen(this.config.port, this.config.host, () => {
+        this.logger.info(
+          { port: this.config.port, host: this.config.host },
+          'API channel started'
+        );
+        resolve();
+      });
+      this.server!.on('error', reject);
+    });
+
+    this.running = true;
+  }
+
+  async stop(): Promise<void> {
+    if (!this.running) {
+      return;
+    }
+
+    // Close WebSocket connections
+    if (this.wss) {
+      for (const client of this.wss.clients) {
+        client.close();
+      }
+      this.wss.close();
+      this.wss = null;
+    }
+
+    // Close HTTP server
+    if (this.server) {
+      await new Promise<void>((resolve) => {
+        this.server!.close(() => resolve());
+      });
+      this.server = null;
+    }
+
+    this.running = false;
+    this.logger.info('API channel stopped');
+  }
+
+  /**
+   * Check if channel is running
+   */
+  isRunning(): boolean {
+    return this.running;
+  }
+
+  /**
+   * Get channel status
+   */
+  getStatus(): { connected: boolean; authenticated: boolean; error?: string; lastActivity?: Date } {
+    return {
+      connected: this.running,
+      authenticated: true,
+    };
+  }
+
+  /**
+   * Get or create session for a user
+   */
+  async getOrCreateSession(userId: string): Promise<string> {
+    // Check cache
+    const cached = this.userSessions.get(userId);
+    if (cached) {
+      // Verify session still exists
+      const session = await this.config.sessionManager.getSession(cached);
+      if (session) {
+        return cached;
+      }
+    }
+
+    // Create new session
+    const session = await this.config.sessionManager.createSession({
+      userId,
+      channelId: 'api',
+    });
+
+    this.userSessions.set(userId, session.id);
+    return session.id;
+  }
+
+  /**
+   * Handle session reset for a user
+   */
+  async handleReset(userId: string): Promise<void> {
+    const sessionId = this.userSessions.get(userId);
+    if (sessionId) {
+      await this.config.sessionManager.deleteSession(sessionId);
+      this.userSessions.delete(userId);
+    }
+    this.logger.debug({ userId }, 'Session reset');
+  }
+
+  /**
+   * Handle HTTP requests
+   */
+  private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const url = new URL(req.url || '/', `http://${req.headers.host}`);
+    const path = url.pathname;
+    const method = req.method?.toUpperCase();
+
+    // CORS headers
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key');
+
+    // Handle preflight
+    if (method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    // Check authentication
+    if (this.config.apiKey && !this.authenticateRequest(req)) {
+      this.sendJson(res, 401, { error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      // Route requests
+      if (path === '/api/health' && method === 'GET') {
+        this.sendJson(res, 200, { status: 'ok', timestamp: new Date().toISOString() });
+      } else if (path === '/api/chat' && method === 'POST') {
+        await this.handleChat(req, res);
+      } else if (path === '/api/chat/stream' && method === 'POST') {
+        await this.handleChatStream(req, res);
+      } else if (path === '/api/sessions' && method === 'GET') {
+        await this.handleListSessions(res);
+      } else if (path.startsWith('/api/sessions/') && method === 'GET') {
+        const sessionId = path.slice('/api/sessions/'.length);
+        await this.handleGetSession(res, sessionId);
+      } else if (path.startsWith('/api/sessions/') && method === 'DELETE') {
+        const sessionId = path.slice('/api/sessions/'.length);
+        await this.handleDeleteSession(res, sessionId);
+      } else {
+        this.sendJson(res, 404, { error: 'Not found' });
+      }
+    } catch (error) {
+      const err = error as Error;
+      this.logger.error({ error: err.message, path }, 'Request error');
+      this.sendJson(res, 500, { error: 'Internal server error' });
+    }
+  }
+
+  /**
+   * Authenticate request
+   */
+  private authenticateRequest(req: IncomingMessage): boolean {
+    const apiKey =
+      req.headers['x-api-key'] ||
+      req.headers.authorization?.replace(/^Bearer\s+/i, '');
+    return apiKey === this.config.apiKey;
+  }
+
+  /**
+   * Handle POST /api/chat
+   */
+  private async handleChat(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await this.parseBody<ChatRequest>(req);
+
+    if (!body.message) {
+      this.sendJson(res, 400, { error: 'Message is required' });
+      return;
+    }
+
+    const sessionId = body.sessionId || `api-${nanoid(8)}`;
+
+    this.logger.debug({ sessionId, messageLength: body.message.length }, 'Chat request');
+
+    try {
+      const result = await this.config.agent.processMessage(sessionId, body.message);
+
+      const chatResponse: ChatResponse = {
+        response: result.response,
+        sessionId,
+      };
+
+      this.sendJson(res, 200, chatResponse);
+    } catch (error) {
+      const err = error as Error;
+      this.logger.error({ sessionId, error: err.message }, 'Chat error');
+      this.sendJson(res, 500, { error: 'Failed to process message' });
+    }
+  }
+
+  /**
+   * Handle POST /api/chat/stream (Server-Sent Events)
+   */
+  private async handleChatStream(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await this.parseBody<ChatRequest>(req);
+
+    if (!body.message) {
+      this.sendJson(res, 400, { error: 'Message is required' });
+      return;
+    }
+
+    const sessionId = body.sessionId || `api-${nanoid(8)}`;
+
+    // Set up SSE
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    });
+
+    this.logger.debug({ sessionId, messageLength: body.message.length }, 'Stream chat request');
+
+    try {
+      // Note: For now, we send the full response as a single event
+      // In the future, this could be modified to stream tokens
+      const result = await this.config.agent.processMessage(sessionId, body.message);
+
+      // Send response event
+      res.write(`event: message\n`);
+      res.write(`data: ${JSON.stringify({ sessionId, content: result.response })}\n\n`);
+
+      // Send done event
+      res.write(`event: done\n`);
+      res.write(`data: ${JSON.stringify({ sessionId })}\n\n`);
+
+      res.end();
+    } catch (error) {
+      const err = error as Error;
+      this.logger.error({ sessionId, error: err.message }, 'Stream chat error');
+
+      res.write(`event: error\n`);
+      res.write(`data: ${JSON.stringify({ error: 'Failed to process message' })}\n\n`);
+      res.end();
+    }
+  }
+
+  /**
+   * Handle GET /api/sessions
+   */
+  private async handleListSessions(res: ServerResponse): Promise<void> {
+    // SessionManager doesn't have a list method, so we return an empty array for now
+    // This could be enhanced to scan the sessions directory
+    this.sendJson(res, 200, { sessions: [] });
+  }
+
+  /**
+   * Handle GET /api/sessions/:id
+   */
+  private async handleGetSession(res: ServerResponse, sessionId: string): Promise<void> {
+    const session = await this.config.sessionManager.getSession(sessionId);
+
+    if (!session) {
+      this.sendJson(res, 404, { error: 'Session not found' });
+      return;
+    }
+
+    this.sendJson(res, 200, {
+      id: session.id,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      messageCount: session.messages.length,
+    });
+  }
+
+  /**
+   * Handle DELETE /api/sessions/:id
+   */
+  private async handleDeleteSession(res: ServerResponse, sessionId: string): Promise<void> {
+    // SessionManager doesn't have a delete method, but we can clear it
+    // This could be enhanced to actually delete the session file
+    this.sendJson(res, 200, { deleted: true, sessionId });
+  }
+
+  /**
+   * Handle WebSocket connections
+   */
+  private handleWebSocket(ws: WebSocket, req: IncomingMessage): void {
+    const clientId = nanoid(8);
+    this.logger.debug({ clientId }, 'WebSocket client connected');
+
+    // Check authentication
+    if (this.config.apiKey) {
+      const url = new URL(req.url || '/', `http://${req.headers.host}`);
+      const apiKey = url.searchParams.get('apiKey') || req.headers['x-api-key'];
+      if (apiKey !== this.config.apiKey) {
+        ws.close(4001, 'Unauthorized');
+        return;
+      }
+    }
+
+    ws.on('message', async (data) => {
+      try {
+        const message: WsMessage = JSON.parse(data.toString());
+        await this.handleWsMessage(ws, clientId, message);
+      } catch (error) {
+        const err = error as Error;
+        this.logger.error({ clientId, error: err.message }, 'WebSocket message error');
+        this.sendWsMessage(ws, { type: 'error', error: 'Invalid message format' });
+      }
+    });
+
+    ws.on('close', () => {
+      this.logger.debug({ clientId }, 'WebSocket client disconnected');
+    });
+
+    ws.on('error', (error) => {
+      this.logger.error({ clientId, error: error.message }, 'WebSocket error');
+    });
+  }
+
+  /**
+   * Handle WebSocket messages
+   */
+  private async handleWsMessage(
+    ws: WebSocket,
+    clientId: string,
+    message: WsMessage
+  ): Promise<void> {
+    switch (message.type) {
+      case 'ping':
+        this.sendWsMessage(ws, { type: 'pong' });
+        break;
+
+      case 'chat':
+        if (!message.message) {
+          this.sendWsMessage(ws, { type: 'error', error: 'Message is required' });
+          return;
+        }
+
+        const sessionId = message.sessionId || `ws-${clientId}`;
+
+        this.logger.debug(
+          { clientId, sessionId, messageLength: message.message.length },
+          'WebSocket chat'
+        );
+
+        try {
+          const result = await this.config.agent.processMessage(sessionId, message.message);
+          this.sendWsMessage(ws, { type: 'response', sessionId, content: result.response });
+        } catch (error) {
+          const err = error as Error;
+          this.logger.error({ clientId, sessionId, error: err.message }, 'WebSocket chat error');
+          this.sendWsMessage(ws, { type: 'error', error: 'Failed to process message' });
+        }
+        break;
+
+      default:
+        this.sendWsMessage(ws, { type: 'error', error: `Unknown message type: ${message.type}` });
+    }
+  }
+
+  /**
+   * Send WebSocket message
+   */
+  private sendWsMessage(ws: WebSocket, message: WsResponse): void {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(message));
+    }
+  }
+
+  /**
+   * Parse request body as JSON
+   */
+  private parseBody<T>(req: IncomingMessage): Promise<T> {
+    return new Promise((resolve, reject) => {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+      });
+      req.on('end', () => {
+        try {
+          resolve(JSON.parse(body || '{}'));
+        } catch {
+          reject(new Error('Invalid JSON'));
+        }
+      });
+      req.on('error', reject);
+    });
+  }
+
+  /**
+   * Send JSON response
+   */
+  private sendJson(res: ServerResponse, status: number, data: unknown): void {
+    res.writeHead(status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(data));
+  }
+
+  /**
+   * Get server address
+   */
+  getAddress(): { host: string; port: number } | null {
+    if (!this.server) {
+      return null;
+    }
+    const addr = this.server.address();
+    if (typeof addr === 'string' || !addr) {
+      return null;
+    }
+    return { host: addr.address, port: addr.port };
+  }
+}

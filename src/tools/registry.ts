@@ -1,5 +1,6 @@
 import type { Tool, ToolRegistry } from './types.js';
 import type { ToolDefinition } from '../providers/types.js';
+import type { MemoryStore, HybridSearch } from '../memory/index.js';
 
 export class ToolRegistryImpl implements ToolRegistry {
   private tools: Map<string, Tool> = new Map();
@@ -34,9 +35,23 @@ export class ToolRegistryImpl implements ToolRegistry {
 }
 
 /**
+ * Options for creating tool registry
+ */
+export interface ToolRegistryOptions {
+  /** Memory store instance for memory tools */
+  memoryStore?: MemoryStore;
+  /** Hybrid search instance for memory tools */
+  hybridSearch?: HybridSearch;
+  /** Whether to include memory tools (default: true if memoryStore provided) */
+  includeMemoryTools?: boolean;
+}
+
+/**
  * Create a registry with all default tools
  */
-export async function createDefaultToolRegistry(): Promise<ToolRegistryImpl> {
+export async function createDefaultToolRegistry(
+  options: ToolRegistryOptions = {}
+): Promise<ToolRegistryImpl> {
   const { ReadTool } = await import('./read.js');
   const { WriteTool } = await import('./write.js');
   const { EditTool } = await import('./edit.js');
@@ -49,6 +64,19 @@ export async function createDefaultToolRegistry(): Promise<ToolRegistryImpl> {
   registry.registerTool(new EditTool());
   registry.registerTool(new BashTool());
   registry.registerTool(new BrowserTool());
+
+  // Add memory tools if store is provided
+  const includeMemory = options.includeMemoryTools ?? !!options.memoryStore;
+  if (includeMemory) {
+    const { MemorySearchTool, MemoryGetTool, initializeMemoryTools } = await import('./memory.js');
+
+    if (options.memoryStore) {
+      initializeMemoryTools(options.memoryStore, options.hybridSearch);
+    }
+
+    registry.registerTool(new MemorySearchTool());
+    registry.registerTool(new MemoryGetTool());
+  }
 
   return registry;
 }

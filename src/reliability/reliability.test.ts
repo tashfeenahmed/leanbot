@@ -6,6 +6,7 @@ import {
   NotificationManager,
   ProviderHealth,
   NotificationType,
+  DegradationLadder,
 } from './reliability.js';
 import type { LLMProvider, CompletionRequest, CompletionResponse } from '../providers/types.js';
 import type { Logger } from 'pino';
@@ -498,6 +499,308 @@ describe('NotificationManager', () => {
 
       // Should be rate limited to fewer calls
       expect(mockNotifiers.get('telegram')).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe('DegradationLadder', () => {
+  let ladder: DegradationLadder;
+  let mockProviders: Map<string, LLMProvider>;
+  let mockLogger: Logger;
+
+  const createMockProvider = (name: string, options: { shouldFail?: boolean; available?: boolean } = {}): LLMProvider => ({
+    name,
+    isAvailable: () => options.available ?? true,
+    complete: vi.fn().mockImplementation(async () => {
+      if (options.shouldFail) throw new Error(`${name} failed`);
+      return {
+        content: [{ type: 'text', text: `Response from ${name}` }],
+        text: `Response from ${name}`,
+        stopReason: 'end_turn',
+        tokenUsage: { inputTokens: 10, outputTokens: 20 },
+        usage: { inputTokens: 10, outputTokens: 20 },
+        model: name,
+      } as CompletionResponse;
+    }),
+  });
+
+  beforeEach(() => {
+    mockLogger = {
+      info: vi.fn(),
+      debug: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      child: vi.fn().mockReturnThis(),
+    } as unknown as Logger;
+
+    mockProviders = new Map([
+      ['claude-opus', createMockProvider('claude-opus')],
+      ['gpt-4', createMockProvider('gpt-4')],
+      ['groq', createMockProvider('groq')],
+      ['ollama', createMockProvider('ollama')],
+    ]);
+
+    ladder = new DegradationLadder({
+      providers: mockProviders,
+      tiers: [
+        { name: 'claude-opus', tier: 'cloud_premium' },
+        { name: 'gpt-4', tier: 'cloud_premium' },
+        { name: 'groq', tier: 'cloud_budget' },
+        { name: 'ollama', tier: 'local' },
+      ],
+      logger: mockLogger,
+    });
+  });
+
+  describe('execute', () => {
+    it('should use cloud_premium provider first when healthy', async () => {
+      const request = { messages: [{ role: 'user' as const, content: 'Hello' }] };
+
+      const result = await ladder.execute(request);
+
+      expect(result.success).toBe(true);
+      expect(result.tier).toBe('cloud_premium');
+      expect(result.provider).toBe('claude-opus');
+      expect(result.degraded).toBe(false);
+    });
+
+    it('should fallback to cloud_budget tier when cloud_premium fails', async () => {
+      // Make all cloud_premium providers fail
+      mockProviders.set('claude-opus', createMockProvider('claude-opus', { shouldFail: true }));
+      mockProviders.set('gpt-4', createMockProvider('gpt-4', { shouldFail: true }));
+
+      ladder = new DegradationLadder({
+        providers: mockProviders,
+        tiers: [
+          { name: 'claude-opus', tier: 'cloud_premium' },
+          { name: 'gpt-4', tier: 'cloud_premium' },
+          { name: 'groq', tier: 'cloud_budget' },
+          { name: 'ollama', tier: 'local' },
+        ],
+        logger: mockLogger,
+      });
+
+      const request = { messages: [{ role: 'user' as const, content: 'Hello' }] };
+
+      const result = await ladder.execute(request);
+
+      expect(result.success).toBe(true);
+      expect(result.tier).toBe('cloud_budget');
+      expect(result.provider).toBe('groq');
+      expect(result.degraded).toBe(false);
+    });
+
+    it('should fallback to local tier when cloud tiers fail', async () => {
+      // Make all cloud providers fail
+      mockProviders.set('claude-opus', createMockProvider('claude-opus', { shouldFail: true }));
+      mockProviders.set('gpt-4', createMockProvider('gpt-4', { shouldFail: true }));
+      mockProviders.set('groq', createMockProvider('groq', { shouldFail: true }));
+
+      ladder = new DegradationLadder({
+        providers: mockProviders,
+        tiers: [
+          { name: 'claude-opus', tier: 'cloud_premium' },
+          { name: 'gpt-4', tier: 'cloud_premium' },
+          { name: 'groq', tier: 'cloud_budget' },
+          { name: 'ollama', tier: 'local' },
+        ],
+        logger: mockLogger,
+      });
+
+      const request = { messages: [{ role: 'user' as const, content: 'Hello' }] };
+
+      const result = await ladder.execute(request);
+
+      expect(result.success).toBe(true);
+      expect(result.tier).toBe('local');
+      expect(result.provider).toBe('ollama');
+      expect(result.degraded).toBe(false);
+    });
+
+    it('should return offline response when all providers fail', async () => {
+      // Make all providers fail
+      mockProviders = new Map([
+        ['claude-opus', createMockProvider('claude-opus', { shouldFail: true })],
+        ['gpt-4', createMockProvider('gpt-4', { shouldFail: true })],
+        ['groq', createMockProvider('groq', { shouldFail: true })],
+        ['ollama', createMockProvider('ollama', { shouldFail: true })],
+      ]);
+
+      ladder = new DegradationLadder({
+        providers: mockProviders,
+        tiers: [
+          { name: 'claude-opus', tier: 'cloud_premium' },
+          { name: 'gpt-4', tier: 'cloud_premium' },
+          { name: 'groq', tier: 'cloud_budget' },
+          { name: 'ollama', tier: 'local' },
+        ],
+        logger: mockLogger,
+      });
+
+      const request = { messages: [{ role: 'user' as const, content: 'Hello' }] };
+
+      const result = await ladder.execute(request);
+
+      expect(result.success).toBe(true);
+      expect(result.tier).toBe('offline');
+      expect(result.degraded).toBe(true);
+      expect(result.response?.text).toContain('offline mode');
+    });
+
+    it('should use custom offline message', async () => {
+      mockProviders = new Map([
+        ['claude-opus', createMockProvider('claude-opus', { shouldFail: true })],
+      ]);
+
+      ladder = new DegradationLadder({
+        providers: mockProviders,
+        tiers: [{ name: 'claude-opus', tier: 'cloud_premium' }],
+        logger: mockLogger,
+        offlineMessage: 'Custom offline message',
+      });
+
+      const request = { messages: [{ role: 'user' as const, content: 'Hello' }] };
+
+      const result = await ladder.execute(request);
+
+      expect(result.response?.text).toBe('Custom offline message');
+    });
+
+    it('should skip unavailable providers', async () => {
+      mockProviders.set('claude-opus', createMockProvider('claude-opus', { available: false }));
+
+      ladder = new DegradationLadder({
+        providers: mockProviders,
+        tiers: [
+          { name: 'claude-opus', tier: 'cloud_premium' },
+          { name: 'gpt-4', tier: 'cloud_premium' },
+        ],
+        logger: mockLogger,
+      });
+
+      const request = { messages: [{ role: 'user' as const, content: 'Hello' }] };
+
+      const result = await ladder.execute(request);
+
+      expect(result.provider).toBe('gpt-4');
+    });
+  });
+
+  describe('getState', () => {
+    it('should return current degradation state', () => {
+      const state = ladder.getState();
+
+      expect(state.currentTier).toBe('cloud_premium');
+      expect(state.availableTiers).toContain('cloud_premium');
+      expect(state.availableTiers).toContain('cloud_budget');
+      expect(state.availableTiers).toContain('local');
+      expect(state.degradedSince).toBeUndefined();
+    });
+
+    it('should update state after degradation', async () => {
+      // Make all providers fail
+      mockProviders = new Map([
+        ['claude-opus', createMockProvider('claude-opus', { shouldFail: true })],
+      ]);
+
+      ladder = new DegradationLadder({
+        providers: mockProviders,
+        tiers: [{ name: 'claude-opus', tier: 'cloud_premium' }],
+        logger: mockLogger,
+      });
+
+      await ladder.execute({ messages: [{ role: 'user' as const, content: 'Hello' }] });
+
+      const state = ladder.getState();
+
+      expect(state.currentTier).toBe('offline');
+      expect(state.degradedSince).toBeDefined();
+      expect(state.message).toContain('unavailable');
+    });
+  });
+
+  describe('isDegraded', () => {
+    it('should return false when not in offline mode', () => {
+      expect(ladder.isDegraded()).toBe(false);
+    });
+
+    it('should return true when in offline mode', async () => {
+      // Make all providers fail
+      mockProviders = new Map([
+        ['claude-opus', createMockProvider('claude-opus', { shouldFail: true })],
+      ]);
+
+      ladder = new DegradationLadder({
+        providers: mockProviders,
+        tiers: [{ name: 'claude-opus', tier: 'cloud_premium' }],
+        logger: mockLogger,
+      });
+
+      await ladder.execute({ messages: [{ role: 'user' as const, content: 'Hello' }] });
+
+      expect(ladder.isDegraded()).toBe(true);
+    });
+  });
+
+  describe('getHealthStatus', () => {
+    it('should return health status for all providers', () => {
+      const status = ladder.getHealthStatus();
+
+      expect(status.has('claude-opus')).toBe(true);
+      expect(status.has('gpt-4')).toBe(true);
+      expect(status.has('groq')).toBe(true);
+      expect(status.has('ollama')).toBe(true);
+
+      const opusStatus = status.get('claude-opus');
+      expect(opusStatus?.tier).toBe('cloud_premium');
+    });
+  });
+
+  describe('resetProvider', () => {
+    it('should reset health for specific provider', async () => {
+      // Cause provider to become unhealthy
+      mockProviders.set('claude-opus', createMockProvider('claude-opus', { shouldFail: true }));
+
+      ladder = new DegradationLadder({
+        providers: mockProviders,
+        tiers: [{ name: 'claude-opus', tier: 'cloud_premium' }],
+        logger: mockLogger,
+        failureThreshold: 1,
+      });
+
+      // This should mark provider as unhealthy
+      await ladder.execute({ messages: [{ role: 'user' as const, content: 'Hello' }] });
+
+      // Reset the provider
+      ladder.resetProvider('claude-opus');
+
+      // Provider should be healthy again
+      const status = ladder.getHealthStatus();
+      expect(status.get('claude-opus')?.successCount).toBeGreaterThan(0);
+    });
+  });
+
+  describe('resetAll', () => {
+    it('should reset health for all providers and exit degraded mode', async () => {
+      // Make all providers fail
+      mockProviders = new Map([
+        ['claude-opus', createMockProvider('claude-opus', { shouldFail: true })],
+      ]);
+
+      ladder = new DegradationLadder({
+        providers: mockProviders,
+        tiers: [{ name: 'claude-opus', tier: 'cloud_premium' }],
+        logger: mockLogger,
+      });
+
+      await ladder.execute({ messages: [{ role: 'user' as const, content: 'Hello' }] });
+      expect(ladder.isDegraded()).toBe(true);
+
+      ladder.resetAll();
+
+      expect(ladder.isDegraded()).toBe(false);
+      const state = ladder.getState();
+      expect(state.currentTier).toBe('cloud_premium');
     });
   });
 });

@@ -32,7 +32,92 @@ const BUNDLED_SKILL_DIR = join(dirname(import.meta.url.replace('file://', '')), 
 /**
  * Gate check result
  */
-interface GateResult {
+export interface GateResult {
+  available: boolean;
+  reason?: string;
+}
+
+/**
+ * Check if a binary exists on PATH (synchronous)
+ */
+function hasBinary(name: string): boolean {
+  try {
+    const cmd = platform() === 'win32' ? `where ${name}` : `which ${name}`;
+    execSync(cmd, { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if skill gates are satisfied (synchronous version for SDK)
+ * This is a standalone function that can be used without a SkillLoader instance.
+ */
+export function checkGates(metadata?: SkillMetadata): GateResult {
+  if (!metadata?.openclaw) {
+    return { available: true };
+  }
+
+  const oc = metadata.openclaw;
+
+  // Check OS restriction
+  if (oc.os) {
+    const currentPlatform = platform();
+    const allowedPlatforms = Array.isArray(oc.os) ? oc.os : [oc.os];
+    if (!allowedPlatforms.includes(currentPlatform)) {
+      return {
+        available: false,
+        reason: `Requires platform: ${allowedPlatforms.join(' or ')} (current: ${currentPlatform})`,
+      };
+    }
+  }
+
+  // Check required binaries
+  if (oc.requires?.bins?.length) {
+    for (const bin of oc.requires.bins) {
+      if (!hasBinary(bin)) {
+        return {
+          available: false,
+          reason: `Missing required binary: ${bin}`,
+        };
+      }
+    }
+  }
+
+  // Check anyBins (at least one must exist)
+  if (oc.requires?.anyBins?.length) {
+    const hasAny = oc.requires.anyBins.some((bin) => hasBinary(bin));
+    if (!hasAny) {
+      return {
+        available: false,
+        reason: `Missing one of required binaries: ${oc.requires.anyBins.join(', ')}`,
+      };
+    }
+  }
+
+  // Check required environment variables
+  if (oc.requires?.env?.length) {
+    for (const envVar of oc.requires.env) {
+      if (!process.env[envVar]) {
+        return {
+          available: false,
+          reason: `Missing required environment variable: ${envVar}`,
+        };
+      }
+    }
+  }
+
+  // Note: Config file checking requires async access, so we skip it in sync version
+  // The async method on SkillLoader still handles config checking
+
+  return { available: true };
+}
+
+/**
+ * Internal gate result type for the loader
+ */
+interface LoaderGateResult {
   passed: boolean;
   reason?: string;
 }
@@ -207,7 +292,7 @@ export class SkillLoader {
   /**
    * Check if skill gates are satisfied
    */
-  async checkGates(metadata?: SkillMetadata): Promise<GateResult> {
+  async checkGates(metadata?: SkillMetadata): Promise<LoaderGateResult> {
     if (!metadata?.openclaw) {
       return { passed: true };
     }
