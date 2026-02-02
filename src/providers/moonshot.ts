@@ -190,9 +190,11 @@ export class MoonshotProvider implements LLMProvider {
     const choice = response.choices[0];
     const content: ContentBlock[] = [];
 
-    // Add text content
-    if (choice.message.content) {
-      content.push({ type: 'text', text: choice.message.content });
+    // Add text content - Kimi K2.5 may use reasoning_content instead of content
+    const message = choice.message as OpenAI.ChatCompletionMessage & { reasoning_content?: string };
+    const textContent = message.content || message.reasoning_content;
+    if (textContent) {
+      content.push({ type: 'text', text: textContent });
     }
 
     // Add tool calls
