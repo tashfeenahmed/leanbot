@@ -247,10 +247,10 @@ export class ContextManager {
       };
     }
 
-    // Split into hot and cold messages
-    const hotStartIndex = Math.max(0, processedMessages.length - this.hotWindowSize);
-    const hotMessages = processedMessages.slice(hotStartIndex);
-    const coldMessages = processedMessages.slice(0, hotStartIndex);
+    // Find a safe split point that doesn't break tool call chains
+    const safeSplitIndex = this.findSafeSplitIndex(processedMessages, this.hotWindowSize);
+    const hotMessages = processedMessages.slice(safeSplitIndex);
+    const coldMessages = processedMessages.slice(0, safeSplitIndex);
 
     // Compress cold messages
     const warmSummary = this.compressMessages(coldMessages);
@@ -261,6 +261,70 @@ export class ContextManager {
       wasCompressed: coldMessages.length > 0,
       estimatedTokens: this.estimateTokens(hotMessages),
     };
+  }
+
+  /**
+   * Find a safe index to split messages without breaking tool call/result chains.
+   * Tool calls (assistant with tool_use) and their results (user with tool_result)
+   * must stay together to avoid orphaned tool_call_ids.
+   *
+   * Note: Moonshot/Kimi reuses tool_call IDs (e.g., "bash:2" for multiple calls),
+   * so we need to match each tool_result with the tool_use that PRECEDES it,
+   * not just any tool_use with the same ID.
+   */
+  private findSafeSplitIndex(messages: Message[], targetHotSize: number): number {
+    // Start from the ideal split point
+    let splitIndex = Math.max(0, messages.length - targetHotSize);
+
+    // Build a list of (index, tool_use_id) for all tool_use blocks
+    const toolUseOccurrences: Array<{ index: number; id: string }> = [];
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (typeof msg.content !== 'string') {
+        for (const block of msg.content) {
+          if (block.type === 'tool_use') {
+            toolUseOccurrences.push({ index: i, id: (block as { id: string }).id });
+          }
+        }
+      }
+    }
+
+    // Helper: find the tool_use that PRECEDES a given message index with matching ID
+    const findPrecedingToolUse = (toolResultIndex: number, toolUseId: string): number | undefined => {
+      // Search backwards from the tool_result to find the matching tool_use
+      for (let i = toolUseOccurrences.length - 1; i >= 0; i--) {
+        const occurrence = toolUseOccurrences[i];
+        if (occurrence.id === toolUseId && occurrence.index < toolResultIndex) {
+          return occurrence.index;
+        }
+      }
+      return undefined;
+    };
+
+    // Find the minimum index we need to include to keep all tool chains intact
+    let minRequiredIndex = splitIndex;
+
+    // Scan hot section for tool_results and ensure their preceding tool_uses are included
+    for (let i = splitIndex; i < messages.length; i++) {
+      const msg = messages[i];
+      if (typeof msg.content !== 'string') {
+        for (const block of msg.content) {
+          if (block.type === 'tool_result') {
+            const toolUseId = (block as { tool_use_id: string }).tool_use_id;
+            const toolUseIndex = findPrecedingToolUse(i, toolUseId);
+
+            if (toolUseIndex !== undefined && toolUseIndex < minRequiredIndex) {
+              // This tool_result references a tool_use that's being compressed
+              // We need to include that tool_use message
+              minRequiredIndex = toolUseIndex;
+            }
+          }
+        }
+      }
+    }
+
+    // Return the minimum index that keeps all tool chains intact
+    return minRequiredIndex;
   }
 
   private truncateToolOutputs(messages: Message[]): Message[] {

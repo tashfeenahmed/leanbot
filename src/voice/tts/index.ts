@@ -1,16 +1,18 @@
 /**
  * TTS Router - manages local and cloud TTS providers
  *
- * Priority: Local (macOS say / Piper) -> Cloud (OpenAI)
+ * Priority: Local (Kokoro / Piper / macOS say) -> Cloud (OpenAI)
  */
 
 import type { TTSProvider, TTSOptions, TTSResult } from '../types.js';
+import { KokoroTTS, type KokoroConfig } from './local/kokoro.js';
 import { PiperTTS, type PiperConfig } from './local/piper.js';
 import { MacOSTTS, type MacOSTTSConfig } from './local/macos.js';
 import { OpenAITTS, type OpenAITTSConfig } from './cloud/openai.js';
 
 export interface TTSRouterConfig {
   preferLocal: boolean;
+  kokoro?: KokoroConfig;
   piper?: PiperConfig;
   macos?: MacOSTTSConfig;
   openai?: OpenAITTSConfig;
@@ -27,10 +29,15 @@ export class TTSRouter implements TTSProvider {
 
     // Add local providers first if preferLocal
     if (config.preferLocal) {
-      // macOS say is zero-config, add it first for ease
+      // Kokoro is preferred (lightweight, high quality)
+      if (config.kokoro !== undefined) {
+        this.providers.push(new KokoroTTS(config.kokoro));
+      }
+      // macOS say is zero-config, add it for ease
       if (process.platform === 'darwin') {
         this.providers.push(new MacOSTTS(config.macos));
       }
+      // Piper as fallback
       this.providers.push(new PiperTTS(config.piper));
     }
 
@@ -41,6 +48,9 @@ export class TTSRouter implements TTSProvider {
 
     // Add local providers at end if not preferLocal
     if (!config.preferLocal) {
+      if (config.kokoro !== undefined) {
+        this.providers.push(new KokoroTTS(config.kokoro));
+      }
       if (process.platform === 'darwin') {
         this.providers.push(new MacOSTTS(config.macos));
       }
@@ -98,6 +108,7 @@ export class TTSRouter implements TTSProvider {
 }
 
 // Re-export individual providers
+export { KokoroTTS } from './local/kokoro.js';
 export { PiperTTS } from './local/piper.js';
 export { MacOSTTS } from './local/macos.js';
 export { OpenAITTS } from './cloud/openai.js';

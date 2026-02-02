@@ -44,14 +44,31 @@ export class VoiceManager {
     const openaiKey = process.env.OPENAI_API_KEY || '';
     const groqKey = process.env.GROQ_API_KEY || '';
 
+    // Check for local voice model preferences
+    const useLocalSTT = process.env.VOICE_LOCAL_STT !== 'false';
+    const useLocalTTS = process.env.VOICE_LOCAL_TTS !== 'false';
+    const sttModel = (process.env.VOICE_STT_MODEL || 'small') as 'tiny' | 'base' | 'small' | 'medium';
+    const ttsVoice = (process.env.VOICE_TTS_VOICE || 'af_heart') as 'af_heart' | 'af_bella' | 'am_adam';
+
     return new VoiceManager({
       stt: {
         preferLocal: true,
+        // faster-whisper is preferred for local STT (CTranslate2 optimized)
+        fasterWhisper: useLocalSTT ? {
+          model: sttModel,
+          device: 'cpu',
+          computeType: 'int8', // Low memory usage
+        } : undefined,
         groq: groqKey ? { apiKey: groqKey } : undefined,
         openai: openaiKey ? { apiKey: openaiKey } : undefined,
       },
       tts: {
         preferLocal: true,
+        // Kokoro is preferred for local TTS (lightweight, high quality)
+        kokoro: useLocalTTS ? {
+          voice: ttsVoice,
+          lang: 'a', // American English
+        } : undefined,
         openai: openaiKey ? { apiKey: openaiKey } : undefined,
       },
       logger,
@@ -203,10 +220,14 @@ export * from './types.js';
 export { STTRouter } from './stt/index.js';
 export { TTSRouter } from './tts/index.js';
 export { AudioRecorder, AudioPlayer, detectVoiceActivity } from './audio.js';
+// STT providers
+export { FasterWhisperSTT, checkFasterWhisperRequirements } from './stt/local/faster-whisper.js';
 export { WhisperSTT, downloadWhisperModel } from './stt/local/whisper.js';
 export { MacOSSTT } from './stt/local/macos.js';
 export { GroqSTT } from './stt/cloud/groq.js';
 export { OpenAISTT } from './stt/cloud/openai.js';
+// TTS providers
+export { KokoroTTS, checkKokoroRequirements, KOKORO_VOICES } from './tts/local/kokoro.js';
 export { PiperTTS, downloadPiperModel } from './tts/local/piper.js';
 export { MacOSTTS } from './tts/local/macos.js';
 export { OpenAITTS } from './tts/cloud/openai.js';

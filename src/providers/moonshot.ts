@@ -19,6 +19,7 @@ import type {
   CompletionRequest,
   CompletionResponse,
   ContentBlock,
+  ToolResultContent,
 } from './types.js';
 
 /**
@@ -153,16 +154,19 @@ export class MoonshotProvider implements LLMProvider {
         } as OpenAI.ChatCompletionMessageParam);
       } else {
         // Handle content blocks (tool results, etc.)
-        const toolResults = msg.content.filter((c) => c.type === 'tool_result');
+        const toolResults = msg.content.filter((c): c is ToolResultContent => c.type === 'tool_result');
         if (toolResults.length > 0 && msg.role === 'user') {
-          for (const result of toolResults) {
-            if (result.type === 'tool_result') {
-              messages.push({
-                role: 'tool',
-                tool_call_id: result.tool_use_id,
-                content: result.content,
-              });
+          for (const toolResult of toolResults) {
+            // Validate tool_use_id exists and is not empty
+            if (!toolResult.tool_use_id) {
+              console.error('[MOONSHOT] Missing tool_use_id in tool_result:', JSON.stringify(toolResult));
+              continue;
             }
+            messages.push({
+              role: 'tool',
+              tool_call_id: toolResult.tool_use_id,
+              content: toolResult.content || '',
+            });
           }
         } else {
           // Text and tool_use content

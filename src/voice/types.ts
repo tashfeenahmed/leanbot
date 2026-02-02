@@ -41,13 +41,14 @@ export interface TTSResult {
 export interface VoiceConfig {
   stt: {
     preferLocal: boolean;
-    localProvider?: 'whisper' | 'macos';
+    localProvider?: 'faster-whisper' | 'whisper' | 'macos';
     cloudProvider?: 'openai' | 'groq';
     language?: string;
+    model?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3';
   };
   tts: {
     preferLocal: boolean;
-    localProvider?: 'piper' | 'macos';
+    localProvider?: 'kokoro' | 'piper' | 'macos';
     cloudProvider?: 'openai' | 'elevenlabs';
     voice?: string;
   };
@@ -56,14 +57,15 @@ export interface VoiceConfig {
 export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
   stt: {
     preferLocal: true,
-    localProvider: 'whisper',
+    localProvider: 'faster-whisper', // CTranslate2 optimized, best performance
     cloudProvider: 'groq', // Faster and cheaper than OpenAI
     language: 'en',
+    model: 'small', // Good balance of speed and accuracy for 4GB RAM
   },
   tts: {
     preferLocal: true,
-    localProvider: 'macos', // Zero setup on Mac
+    localProvider: 'kokoro', // Lightweight 82M params, high quality
     cloudProvider: 'openai',
-    voice: 'alloy',
+    voice: 'af_heart', // Warm, expressive voice
   },
 };

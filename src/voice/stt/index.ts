@@ -1,10 +1,11 @@
 /**
  * STT Router - manages local and cloud STT providers
  *
- * Priority: Local (Whisper.cpp) -> Cloud (Groq) -> Cloud (OpenAI)
+ * Priority: Local (faster-whisper) -> Local (Whisper.cpp) -> Cloud (Groq) -> Cloud (OpenAI)
  */
 
 import type { STTProvider, STTOptions, STTResult } from '../types.js';
+import { FasterWhisperSTT, type FasterWhisperConfig } from './local/faster-whisper.js';
 import { WhisperSTT, type WhisperConfig } from './local/whisper.js';
 import { MacOSSTT } from './local/macos.js';
 import { GroqSTT, type GroqSTTConfig } from './cloud/groq.js';
@@ -12,6 +13,7 @@ import { OpenAISTT, type OpenAISTTConfig } from './cloud/openai.js';
 
 export interface STTRouterConfig {
   preferLocal: boolean;
+  fasterWhisper?: FasterWhisperConfig;
   whisper?: WhisperConfig;
   groq?: GroqSTTConfig;
   openai?: OpenAISTTConfig;
@@ -28,6 +30,11 @@ export class STTRouter implements STTProvider {
 
     // Add local providers first if preferLocal
     if (config.preferLocal) {
+      // faster-whisper is preferred (CTranslate2 optimized, better performance)
+      if (config.fasterWhisper !== undefined) {
+        this.providers.push(new FasterWhisperSTT(config.fasterWhisper));
+      }
+      // Fall back to whisper.cpp
       this.providers.push(new WhisperSTT(config.whisper));
       if (process.platform === 'darwin') {
         this.providers.push(new MacOSSTT());
@@ -44,6 +51,9 @@ export class STTRouter implements STTProvider {
 
     // Add local providers at end if not preferLocal
     if (!config.preferLocal) {
+      if (config.fasterWhisper !== undefined) {
+        this.providers.push(new FasterWhisperSTT(config.fasterWhisper));
+      }
       this.providers.push(new WhisperSTT(config.whisper));
       if (process.platform === 'darwin') {
         this.providers.push(new MacOSSTT());
@@ -102,6 +112,7 @@ export class STTRouter implements STTProvider {
 }
 
 // Re-export individual providers
+export { FasterWhisperSTT } from './local/faster-whisper.js';
 export { WhisperSTT } from './local/whisper.js';
 export { MacOSSTT } from './local/macos.js';
 export { GroqSTT } from './cloud/groq.js';
