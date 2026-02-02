@@ -7,6 +7,7 @@ import type { ToolDefinition } from '../providers/types.js';
 export interface ToolContext {
   workspace: string;
   sessionId: string;
+  userId?: string;
   logger: Logger;
 }
 

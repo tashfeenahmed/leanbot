@@ -12,7 +12,7 @@ import {
   ProviderRegistry,
   type LLMProvider,
 } from '../providers/index.js';
-import { createDefaultToolRegistry, type ToolRegistry } from '../tools/index.js';
+import { createDefaultToolRegistry, type ToolRegistry, type Reminder } from '../tools/index.js';
 import { SessionManager } from '../agent/session.js';
 import { Agent } from '../agent/agent.js';
 import { TelegramChannel } from '../channels/telegram.js';
@@ -131,12 +131,15 @@ export class Gateway {
       'Voice manager initialized'
     );
 
-    // Initialize tool registry with skills, memory, and voice
+    // Initialize tool registry with skills, memory, voice, and reminders
     this.toolRegistry = await createDefaultToolRegistry({
       skillRegistry: this.skillRegistry,
       memoryStore: this.memoryStore,
       hybridSearch: this.hybridSearch,
       voiceManager: voiceStatus.tts ? this.voiceManager : undefined, // Only add voice tool if TTS available
+      reminderCallback: async (reminder: Reminder) => {
+        await this.handleReminderTrigger(reminder);
+      },
     });
     this.logger.debug({ tools: this.toolRegistry.getAllTools().map((t) => t.name) }, 'Tools registered');
 
@@ -361,6 +364,22 @@ export class Gateway {
 
   isGatewayRunning(): boolean {
     return this.isRunning;
+  }
+
+  /**
+   * Handle a triggered reminder by sending a message to the user
+   */
+  private async handleReminderTrigger(reminder: Reminder): Promise<void> {
+    this.logger.info({ reminderId: reminder.id, userId: reminder.userId, message: reminder.message }, 'Reminder triggered');
+
+    // Send via Telegram channel
+    if (this.telegramChannel) {
+      const reminderMessage = `**Reminder!**\n\n${reminder.message}`;
+      await this.telegramChannel.sendMessage(reminder.userId, reminderMessage);
+      this.logger.debug({ reminderId: reminder.id }, 'Reminder sent via Telegram');
+    } else {
+      this.logger.warn({ reminderId: reminder.id }, 'No channel available to send reminder');
+    }
   }
 }
 

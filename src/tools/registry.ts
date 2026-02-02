@@ -3,6 +3,7 @@ import type { ToolDefinition } from '../providers/types.js';
 import type { MemoryStore, HybridSearch } from '../memory/index.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { VoiceManager } from '../voice/index.js';
+import type { ReminderCallback } from './reminder.js';
 
 /**
  * Standard tool groups for common workflows
@@ -157,6 +158,10 @@ export interface ToolRegistryOptions {
   toolPolicy?: ToolPolicy;
   /** Additional tool groups to register */
   additionalGroups?: ToolGroup[];
+  /** Callback for when reminders trigger */
+  reminderCallback?: ReminderCallback;
+  /** Whether to include reminder tool (default: true if reminderCallback provided) */
+  includeReminderTool?: boolean;
 }
 
 /**
@@ -211,6 +216,14 @@ export async function createDefaultToolRegistry(
   const braveSearch = initializeBraveSearch();
   if (braveSearch) {
     registry.registerTool(braveSearch);
+  }
+
+  // Add reminder tool if callback is provided
+  const includeReminder = options.includeReminderTool ?? !!options.reminderCallback;
+  if (includeReminder && options.reminderCallback) {
+    const { ReminderTool, initializeReminders } = await import('./reminder.js');
+    initializeReminders(options.reminderCallback);
+    registry.registerTool(new ReminderTool());
   }
 
   // Apply initial policy if provided

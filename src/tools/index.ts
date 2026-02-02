@@ -6,5 +6,6 @@ export { BashTool } from './bash.js';
 export { MemorySearchTool, MemoryGetTool, initializeMemoryTools } from './memory.js';
 export { SkillTool, initializeSkillTool, getSkillRegistry } from './skill.js';
 export { VoiceReplyTool, initializeVoiceTool, getPendingVoiceAttachments, cleanupVoiceAttachments } from './voice.js';
+export { ReminderTool, initializeReminders, getActiveReminders, cancelReminder, type Reminder, type ReminderCallback } from './reminder.js';
 export { ToolRegistryImpl, createDefaultToolRegistry } from './registry.js';
 export type { ToolRegistryOptions } from './registry.js';

@@ -787,6 +787,37 @@ export class TelegramChannel {
     this.isRunning = false;
     this.logger.info('Telegram bot stopped');
   }
+
+  /**
+   * Send a proactive message to a user (not as a reply)
+   * Used for reminders and scheduled notifications
+   */
+  async sendMessage(chatId: string | number, message: string): Promise<void> {
+    if (!this.isRunning) {
+      this.logger.warn({ chatId }, 'Cannot send message - bot not running');
+      return;
+    }
+
+    try {
+      const htmlMessage = formatMarkdownToHtml(message);
+      const chunks = splitMessage(htmlMessage);
+
+      for (const chunk of chunks) {
+        await this.bot.api.sendMessage(chatId, chunk, { parse_mode: 'HTML' });
+      }
+
+      this.logger.debug({ chatId, length: message.length }, 'Sent proactive message');
+    } catch (error) {
+      this.logger.error({ chatId, error: (error as Error).message }, 'Failed to send proactive message');
+    }
+  }
+
+  /**
+   * Get the bot instance for advanced operations
+   */
+  getBotApi() {
+    return this.bot.api;
+  }
 }
 
 // Export for backwards compatibility and testing

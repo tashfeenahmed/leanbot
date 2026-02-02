@@ -68,6 +68,14 @@ Available tools:
 - browser: Navigate websites, scrape content, fill forms (use for interacting with pages, not searching)
 - memory_search: Search past conversations ONLY (not the web!)
 - voice_reply: Send a voice message to the user (use when they ask for audio/voice note)
+- reminder: Set a reminder to message the user after a delay (e.g., "remind me in 5 minutes about X")
+
+REMINDERS - IMPORTANT:
+When the user asks to be reminded about something, use the reminder tool with action="set".
+- This tool returns IMMEDIATELY after scheduling the reminder
+- The reminder will trigger a message to the user when the time comes
+- Examples: "remind me in 5 min", "set a reminder for 1 hour", "alert me in 30 minutes about the meeting"
+- DO NOT use bash sleep or any blocking approach - always use the reminder tool
 
 AUTOMATIC MEMORY - IMPORTANT:
 - Your conversations are AUTOMATICALLY remembered. You don't need to do anything special.
@@ -374,7 +382,8 @@ export class Agent {
 
       // Execute tools and gather results
       this.logger.info({ toolCount: toolUses.length, tools: toolUses.map(t => t.name) }, 'Executing tools');
-      const toolResults = await this.executeTools(toolUses, sessionId);
+      const userId = currentSession?.metadata?.userId;
+      const toolResults = await this.executeTools(toolUses, sessionId, userId);
       this.logger.info({
         resultCount: toolResults.length,
         results: toolResults.map(r => ({
@@ -717,7 +726,8 @@ export class Agent {
 
   private async executeTools(
     toolUses: ToolUseContent[],
-    sessionId: string
+    sessionId: string,
+    userId?: string
   ): Promise<ContentBlock[]> {
     const results: ContentBlock[] = [];
 
@@ -738,6 +748,7 @@ export class Agent {
       const context: ToolContext = {
         workspace: this.workspace,
         sessionId,
+        userId,
         logger: this.logger.child({ tool: toolUse.name }),
       };
 
