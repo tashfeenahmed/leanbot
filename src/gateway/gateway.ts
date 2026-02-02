@@ -159,6 +159,7 @@ export class Gateway {
       router: this.router,
       costTracker: this.costTracker,
       hotCollector: this.hotCollector,
+      hybridSearch: this.hybridSearch || undefined,
       contextManager: this.contextManager,
       mediaProcessor: this.mediaProcessor,
       workspace: this.config.agent.workspace,

@@ -13,7 +13,7 @@ import type { SessionManager } from './session.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { Router } from '../routing/router.js';
 import type { CostTracker } from '../routing/cost.js';
-import type { HotCollector } from '../memory/memory.js';
+import type { HotCollector, HybridSearch } from '../memory/memory.js';
 import type { ContextManager } from '../routing/context.js';
 import type { MediaProcessor } from '../media/index.js';
 import type { Attachment } from '../channels/types.js';
@@ -27,6 +27,7 @@ export interface AgentOptions {
   router?: Router;
   costTracker?: CostTracker;
   hotCollector?: HotCollector;
+  hybridSearch?: HybridSearch;
   contextManager?: ContextManager;
   mediaProcessor?: MediaProcessor;
   workspace: string;
@@ -95,6 +96,7 @@ export class Agent {
   private router: Router | null;
   private costTracker: CostTracker | null;
   private hotCollector: HotCollector | null;
+  private hybridSearch: HybridSearch | null;
   private contextManager: ContextManager | null;
   private mediaProcessor: MediaProcessor | null;
   private workspace: string;
@@ -110,6 +112,7 @@ export class Agent {
     this.router = options.router || null;
     this.costTracker = options.costTracker || null;
     this.hotCollector = options.hotCollector || null;
+    this.hybridSearch = options.hybridSearch || null;
     this.contextManager = options.contextManager || null;
     this.mediaProcessor = options.mediaProcessor || null;
     this.workspace = options.workspace;
@@ -205,8 +208,8 @@ export class Agent {
       });
     }
 
-    // Build system prompt
-    const systemPrompt = await this.buildSystemPrompt();
+    // Build system prompt with memory context
+    const systemPrompt = await this.buildSystemPrompt(userMessage, sessionId);
 
     // Get tool definitions
     const tools = this.toolRegistry.getToolDefinitions();
@@ -346,6 +349,22 @@ export class Agent {
       );
     }
 
+    // Collect assistant response in memory
+    if (this.hotCollector && finalResponse) {
+      this.hotCollector.collect({
+        content: finalResponse,
+        sessionId,
+        source: 'assistant',
+        tags: ['conversation', 'assistant-response'],
+      });
+    }
+
+    // Flush memories to persistent storage
+    if (this.hotCollector) {
+      this.hotCollector.flush(sessionId);
+      this.logger.debug({ sessionId }, 'Memories flushed to store');
+    }
+
     this.logger.info(
       { sessionId, iterations, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, provider: activeProvider.name },
       'Message processed'
@@ -358,7 +377,7 @@ export class Agent {
     };
   }
 
-  private async buildSystemPrompt(): Promise<string> {
+  private async buildSystemPrompt(userMessage: string, sessionId: string): Promise<string> {
     let prompt = this.baseSystemPrompt;
 
     // Add workspace context
@@ -381,7 +400,98 @@ export class Agent {
       // SOUL.md not found, that's fine
     }
 
+    // Add memory context if hybrid search is available
+    if (this.hybridSearch) {
+      const memoryContext = this.buildMemoryContext(userMessage, sessionId);
+      if (memoryContext) {
+        prompt += memoryContext;
+      }
+    }
+
     return prompt;
+  }
+
+  /**
+   * Build memory context for system prompt
+   * Includes relevant memories and recent conversations
+   */
+  private buildMemoryContext(userMessage: string, sessionId: string): string {
+    if (!this.hybridSearch) return '';
+
+    const MAX_MEMORY_CHARS = 2000;
+    const MAX_CONVERSATION_MESSAGES = 6;
+    let context = '';
+
+    try {
+      // Search for relevant memories based on user message
+      const relevantMemories = this.hybridSearch.search(userMessage, {
+        limit: 10,
+        recencyBoost: true,
+        minScore: 0.1,
+      });
+
+      // Filter to facts/context type memories (not raw conversation)
+      const factMemories = relevantMemories.filter(
+        (r) => r.entry.type === 'fact' || r.entry.type === 'context'
+      );
+
+      if (factMemories.length > 0) {
+        let memoriesText = '';
+        let charCount = 0;
+
+        for (const result of factMemories) {
+          const memoryLine = `- ${result.entry.content}\n`;
+          if (charCount + memoryLine.length > MAX_MEMORY_CHARS) break;
+          memoriesText += memoryLine;
+          charCount += memoryLine.length;
+        }
+
+        if (memoriesText) {
+          context += `\n\n## MEMORIES FROM THE PAST\nThese are facts and context you've learned about the user:\n${memoriesText}`;
+        }
+      }
+
+      // Get recent conversation messages from this session
+      const conversationMemories = this.hybridSearch.search(userMessage, {
+        limit: MAX_CONVERSATION_MESSAGES * 2, // Get extra to filter
+        sessionId,
+        recencyBoost: true,
+        minScore: 0.05,
+      });
+
+      // Filter to conversation messages
+      const recentConversations = conversationMemories
+        .filter((r) => r.entry.type === 'raw' && r.entry.tags?.includes('conversation'))
+        .slice(0, MAX_CONVERSATION_MESSAGES);
+
+      if (recentConversations.length > 0) {
+        let conversationText = '';
+
+        for (const result of recentConversations) {
+          const source = result.entry.metadata?.source || 'unknown';
+          const role = source === 'user' ? 'User' : source === 'assistant' ? 'Assistant' : source;
+          const content = result.entry.content.length > 200
+            ? result.entry.content.substring(0, 200) + '...'
+            : result.entry.content;
+          conversationText += `${role}: ${content}\n`;
+        }
+
+        if (conversationText) {
+          context += `\n\n## CONVERSATIONS FROM THE PAST\nRelevant past exchanges:\n${conversationText}`;
+        }
+      }
+
+      if (context) {
+        this.logger.debug(
+          { factCount: factMemories.length, conversationCount: recentConversations.length },
+          'Memory context added to prompt'
+        );
+      }
+    } catch (error) {
+      this.logger.warn({ error: (error as Error).message }, 'Failed to build memory context');
+    }
+
+    return context;
   }
 
   private extractTextContent(content: ContentBlock[]): string {
