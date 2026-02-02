@@ -13,7 +13,187 @@ import { parseFrontmatter } from './parser.js';
 import { checkGates } from './loader.js';
 import type { Skill, SkillFrontmatter } from './types.js';
 
+import { execSync, exec } from 'child_process';
+import { promisify } from 'util';
+import type { SkillInstaller as SkillInstallerSpec } from './types.js';
+
+const execAsync = promisify(exec);
 const DEFAULT_LOCAL_SKILLS_DIR = path.join(homedir(), '.leanbot', 'skills');
+
+/**
+ * Skill installer options
+ */
+export interface SkillInstallerOptions {
+  /** Dry run mode - don't execute commands */
+  dryRun?: boolean;
+  /** Node package manager to use */
+  nodeManager?: 'npm' | 'yarn' | 'pnpm' | 'bun';
+  /** Logger instance */
+  logger?: Logger;
+}
+
+/**
+ * Install execution result
+ */
+export interface InstallExecutionResult {
+  success: boolean;
+  command?: string;
+  output?: string;
+  error?: string;
+}
+
+/**
+ * Skill dependency installer
+ * Executes installation commands for skill dependencies
+ */
+export class SkillInstaller {
+  private dryRun: boolean;
+  private nodeManager: string;
+  private logger: Logger | null;
+
+  constructor(options: SkillInstallerOptions = {}) {
+    this.dryRun = options.dryRun ?? false;
+    this.nodeManager = options.nodeManager || 'npm';
+    this.logger = options.logger?.child({ module: 'skill-installer' }) || null;
+  }
+
+  /**
+   * Select the best installer for the current platform
+   */
+  selectInstaller(
+    installers: SkillInstallerSpec[],
+    platform: string = process.platform
+  ): SkillInstallerSpec | null {
+    // Filter by OS
+    const compatible = installers.filter((inst) => {
+      if (!('os' in inst) || !inst.os) return true;
+      const osList = Array.isArray(inst.os) ? inst.os : [inst.os];
+      return osList.includes(platform);
+    });
+
+    if (compatible.length === 0) return null;
+
+    // Priority order based on platform
+    const priorityOrder =
+      platform === 'darwin'
+        ? ['brew', 'npm', 'go', 'download']
+        : ['npm', 'go', 'download', 'brew'];
+
+    for (const kind of priorityOrder) {
+      const found = compatible.find((inst) => inst.kind === kind);
+      if (found) return found;
+    }
+
+    return compatible[0] || null;
+  }
+
+  /**
+   * Build install command for an installer spec
+   */
+  buildInstallCommand(installer: SkillInstallerSpec): string {
+    switch (installer.kind) {
+      case 'brew':
+        return `brew install ${installer.formula}`;
+
+      case 'npm':
+        return `${this.nodeManager} install -g ${installer.package}`;
+
+      case 'go':
+        return `go install ${installer.package}`;
+
+      case 'uv':
+        return `uv tool install ${installer.package}`;
+
+      case 'download': {
+        const binName = installer.bins?.[0] || 'binary';
+        const installDir = '$HOME/.local/bin';
+        // Download, make executable, and move to bin
+        return `curl -fsSL "${installer.url}" -o /tmp/${binName} && chmod +x /tmp/${binName} && mkdir -p ${installDir} && mv /tmp/${binName} ${installDir}/${binName}`;
+      }
+
+      default:
+        throw new Error(`Unknown installer kind: ${(installer as any).kind}`);
+    }
+  }
+
+  /**
+   * Check if a binary is available
+   */
+  hasBinary(name: string): boolean {
+    try {
+      const cmd = process.platform === 'win32' ? `where ${name}` : `which ${name}`;
+      execSync(cmd, { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Execute an install command
+   */
+  async executeInstall(installer: SkillInstallerSpec): Promise<InstallExecutionResult> {
+    const command = this.buildInstallCommand(installer);
+
+    if (this.dryRun) {
+      this.logger?.info({ command }, 'Dry run: would execute');
+      return { success: true, command };
+    }
+
+    this.logger?.info({ command, kind: installer.kind }, 'Executing install');
+
+    try {
+      const { stdout, stderr } = await execAsync(command, {
+        timeout: 300000, // 5 minute timeout
+        env: { ...process.env, CI: 'true' }, // Non-interactive mode
+      });
+
+      this.logger?.info({ kind: installer.kind }, 'Install completed');
+
+      return {
+        success: true,
+        command,
+        output: stdout + (stderr ? `\n${stderr}` : ''),
+      };
+    } catch (error) {
+      const err = error as Error & { stdout?: string; stderr?: string };
+      this.logger?.error({ error: err.message, command }, 'Install failed');
+
+      return {
+        success: false,
+        command,
+        error: err.message,
+        output: (err.stdout || '') + (err.stderr ? `\n${err.stderr}` : ''),
+      };
+    }
+  }
+
+  /**
+   * Install all dependencies for a skill
+   */
+  async installDependencies(
+    installers: SkillInstallerSpec[]
+  ): Promise<InstallExecutionResult[]> {
+    const results: InstallExecutionResult[] = [];
+
+    const selected = this.selectInstaller(installers);
+    if (!selected) {
+      return [{ success: false, error: 'No compatible installer found' }];
+    }
+
+    // Check if already installed (if bins are specified)
+    if (selected.bins?.length) {
+      const allInstalled = selected.bins.every((bin) => this.hasBinary(bin));
+      if (allInstalled) {
+        this.logger?.info({ bins: selected.bins }, 'Dependencies already installed');
+        return [{ success: true, output: 'Already installed' }];
+      }
+    }
+
+    results.push(await this.executeInstall(selected));
+    return results;
+  }
+}
 
 /**
  * Skill package metadata from registry

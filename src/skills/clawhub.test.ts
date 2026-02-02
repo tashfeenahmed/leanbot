@@ -9,6 +9,110 @@ import * as os from 'os';
 import { createHash } from 'crypto';
 import { SkillPackageManager } from './clawhub.js';
 
+import { SkillInstaller } from './clawhub.js';
+
+describe('SkillInstaller', () => {
+  describe('selectInstaller', () => {
+    it('should prefer brew on macOS', () => {
+      const installers = [
+        { id: 'npm', kind: 'npm' as const, package: 'my-pkg' },
+        { id: 'brew', kind: 'brew' as const, formula: 'my-formula' },
+      ];
+
+      const installer = new SkillInstaller();
+      const selected = installer.selectInstaller(installers, 'darwin');
+
+      expect(selected?.kind).toBe('brew');
+    });
+
+    it('should fall back to npm when brew not available', () => {
+      const installers = [
+        { id: 'npm', kind: 'npm' as const, package: 'my-pkg' },
+        { id: 'brew', kind: 'brew' as const, formula: 'my-formula' },
+      ];
+
+      const installer = new SkillInstaller();
+      const selected = installer.selectInstaller(installers, 'linux');
+
+      expect(selected?.kind).toBe('npm');
+    });
+
+    it('should filter by OS', () => {
+      const installers = [
+        { id: 'brew', kind: 'brew' as const, formula: 'my-formula', os: ['darwin'] },
+        { id: 'npm', kind: 'npm' as const, package: 'my-pkg' },
+      ];
+
+      const installer = new SkillInstaller();
+      const selected = installer.selectInstaller(installers, 'linux');
+
+      expect(selected?.kind).toBe('npm');
+    });
+  });
+
+  describe('buildInstallCommand', () => {
+    it('should build brew install command', () => {
+      const installer = new SkillInstaller();
+      const cmd = installer.buildInstallCommand({
+        id: 'brew',
+        kind: 'brew',
+        formula: 'ripgrep',
+      });
+
+      expect(cmd).toBe('brew install ripgrep');
+    });
+
+    it('should build npm install command', () => {
+      const installer = new SkillInstaller();
+      const cmd = installer.buildInstallCommand({
+        id: 'npm',
+        kind: 'npm',
+        package: 'typescript',
+      });
+
+      expect(cmd).toContain('npm install -g typescript');
+    });
+
+    it('should build go install command', () => {
+      const installer = new SkillInstaller();
+      const cmd = installer.buildInstallCommand({
+        id: 'go',
+        kind: 'go',
+        package: 'github.com/example/tool@latest',
+      });
+
+      expect(cmd).toBe('go install github.com/example/tool@latest');
+    });
+
+    it('should build download command with curl', () => {
+      const installer = new SkillInstaller();
+      const cmd = installer.buildInstallCommand({
+        id: 'download',
+        kind: 'download',
+        url: 'https://example.com/binary',
+        bins: ['binary'],
+      });
+
+      expect(cmd).toContain('curl');
+      expect(cmd).toContain('https://example.com/binary');
+    });
+  });
+
+  describe('executeInstall (mocked)', () => {
+    it('should return command that would be executed', async () => {
+      const installer = new SkillInstaller({ dryRun: true });
+      const result = await installer.executeInstall({
+        id: 'brew',
+        kind: 'brew',
+        formula: 'jq',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.command).toBe('brew install jq');
+    });
+  });
+});
+
 describe('SkillPackageManager', () => {
   let testDir: string;
   let manager: SkillPackageManager;

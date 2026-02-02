@@ -45,6 +45,8 @@ export interface SkillInstaller {
   bins?: string[];
   label?: string;
   url?: string;
+  /** Platform restriction for this installer */
+  os?: string | string[];
 }
 
 /**
