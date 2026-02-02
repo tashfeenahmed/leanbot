@@ -7,6 +7,7 @@ import type {
   ToolUseContent,
   TokenUsage,
   CompletionRequest,
+  CompletionResponse,
 } from '../providers/types.js';
 import type { ToolRegistry, ToolContext } from '../tools/types.js';
 import type { SessionManager } from './session.js';
@@ -246,8 +247,11 @@ export class Agent {
     // Build system prompt with memory context
     const systemPrompt = await this.buildSystemPrompt(userMessage, sessionId);
 
-    // Get tool definitions
-    const tools = this.toolRegistry.getToolDefinitions();
+    // Get filtered tool definitions (respects policy allowlist/denylist)
+    const registry = this.toolRegistry as any;
+    const tools = typeof registry.getFilteredToolDefinitions === 'function'
+      ? registry.getFilteredToolDefinitions()
+      : this.toolRegistry.getToolDefinitions();
 
     // Track usage across iterations
     let totalInputTokens = 0;
@@ -289,16 +293,21 @@ export class Agent {
 
       this.logger.info({ iteration: iterations, messageCount: messages.length, provider: activeProvider.name }, 'Agent iteration starting');
 
-      // Call LLM
+      // Call LLM with error recovery (fallback and emergency compression)
       let response;
       try {
-        response = await activeProvider.complete(request);
+        response = await this.executeWithRecovery(
+          activeProvider,
+          request,
+          sessionId,
+          complexity.suggestedModelTier
+        );
       } catch (error) {
         this.logger.error({
           iteration: iterations,
           error: (error as Error).message,
           provider: activeProvider.name
-        }, 'LLM call failed');
+        }, 'LLM call failed after recovery attempts');
         throw error;
       }
       lastModel = response.model;
@@ -628,6 +637,75 @@ export class Agent {
       .trim();
 
     return cleaned;
+  }
+
+  /**
+   * Execute LLM call with error recovery
+   * - On context overflow: emergency compress and retry
+   * - On provider error: try fallback providers via router
+   */
+  private async executeWithRecovery(
+    provider: LLMProvider,
+    request: CompletionRequest,
+    sessionId: string,
+    tier: 'fast' | 'standard' | 'capable'
+  ): Promise<CompletionResponse> {
+    try {
+      return await provider.complete(request);
+    } catch (error) {
+      const err = error as Error & { status?: number };
+
+      // Check for context overflow errors (400, 413, or message contains "context" or "token")
+      if (this.isContextOverflowError(err)) {
+        this.logger.warn({ error: err.message }, 'Context overflow detected, attempting emergency compression');
+
+        // Emergency compress: keep only last 3 messages
+        if (this.contextManager && request.messages.length > 3) {
+          const compressed = request.messages.slice(-3);
+          const compressedRequest = { ...request, messages: compressed };
+
+          this.logger.info({ originalMessages: request.messages.length, compressedMessages: 3 }, 'Emergency compression applied');
+
+          try {
+            return await provider.complete(compressedRequest);
+          } catch (retryError) {
+            this.logger.error({ error: (retryError as Error).message }, 'Retry after compression failed');
+          }
+        }
+      }
+
+      // Try fallback providers via router
+      if (this.router) {
+        this.logger.warn({ provider: provider.name, error: err.message }, 'Provider failed, trying fallback');
+
+        try {
+          const result = await this.router.executeWithFallback(request, tier);
+          this.logger.info({ fallbackProvider: result.provider, attempted: result.attemptedProviders }, 'Fallback succeeded');
+          return result.response;
+        } catch (fallbackError) {
+          this.logger.error({ error: (fallbackError as Error).message }, 'All fallback providers failed');
+          throw fallbackError;
+        }
+      }
+
+      // No recovery possible
+      throw error;
+    }
+  }
+
+  /**
+   * Check if error is a context overflow error
+   */
+  private isContextOverflowError(error: Error & { status?: number }): boolean {
+    const status = error.status;
+    if (status === 400 || status === 413) return true;
+
+    const message = error.message.toLowerCase();
+    return message.includes('context') ||
+           message.includes('token') ||
+           message.includes('too long') ||
+           message.includes('maximum') ||
+           message.includes('limit');
   }
 
   private async executeTools(

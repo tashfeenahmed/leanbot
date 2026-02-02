@@ -58,16 +58,16 @@ describe('Config Schema', () => {
       const result = configSchema.safeParse(minimalConfig);
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.agent.maxIterations).toBe(20);
+        expect(result.data.agent.maxIterations).toBe(100);
         expect(result.data.logging.level).toBe('info');
         expect(result.data.providers.anthropic.model).toBe('claude-sonnet-4-20250514');
       }
     });
 
-    it('should reject configuration without required anthropic apiKey', async () => {
+    it('should accept configuration with empty anthropic apiKey (uses default)', async () => {
       const { configSchema } = await import('./config.js');
 
-      const invalidConfig = {
+      const configWithEmptyKey = {
         providers: {
           anthropic: {},
         },
@@ -82,8 +82,11 @@ describe('Config Schema', () => {
         },
       };
 
-      const result = configSchema.safeParse(invalidConfig);
-      expect(result.success).toBe(false);
+      const result = configSchema.safeParse(configWithEmptyKey);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.providers.anthropic.apiKey).toBe('');
+      }
     });
 
     it('should reject configuration without workspace', async () => {

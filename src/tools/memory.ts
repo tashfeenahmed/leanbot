@@ -115,6 +115,7 @@ export interface MemoryToolOptions {
  */
 export class MemorySearchTool implements Tool {
   name = 'memory_search';
+  category = 'memory' as const;
   description = 'Search through stored memories using keyword and semantic matching';
 
   private search: HybridSearch | null;
@@ -212,6 +213,7 @@ export class MemorySearchTool implements Tool {
  */
 export class MemoryGetTool implements Tool {
   name = 'memory_get';
+  category = 'memory' as const;
   description = 'Retrieve specific memories by ID or get all memories for a session';
 
   private store: MemoryStore | null;

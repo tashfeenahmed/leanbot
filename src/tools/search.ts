@@ -43,6 +43,7 @@ interface BraveWebResults {
 
 export class BraveSearchTool implements Tool {
   public readonly name = 'web_search';
+  public readonly category = 'search' as const;
   public readonly description = 'Search the web using Brave Search API';
 
   private apiKey: string;

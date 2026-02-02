@@ -22,6 +22,7 @@ export interface VoiceToolConfig {
 
 export class VoiceReplyTool implements Tool {
   public readonly name = 'voice_reply';
+  public readonly category = 'comms' as const;
   public readonly description = 'Send a voice message to the user. Use this when the user asks for a voice note, audio response, or when voice would be more appropriate than text.';
 
   private voiceManager: VoiceManager;

@@ -7,6 +7,7 @@ const MAX_OUTPUT_SIZE = 30 * 1024; // 30KB
 
 export class BashTool implements Tool {
   name = 'bash';
+  category = 'system' as const;
   description = 'Execute a bash command and return its output';
 
   definition: ToolDefinition = {

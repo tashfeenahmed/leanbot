@@ -1,12 +1,32 @@
-import type { Tool, ToolRegistry } from './types.js';
+import type { Tool, ToolRegistry, ToolCategory, ToolPolicy, ToolGroup } from './types.js';
 import type { ToolDefinition } from '../providers/types.js';
 import type { MemoryStore, HybridSearch } from '../memory/index.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { VoiceManager } from '../voice/index.js';
 
+/**
+ * Standard tool groups for common workflows
+ */
+export const STANDARD_GROUPS: ToolGroup[] = [
+  { id: 'fs', name: 'File System', description: 'File read/write/edit operations', tools: ['read', 'write', 'edit'] },
+  { id: 'dev', name: 'Development', description: 'Full development workflow', tools: ['read', 'write', 'edit', 'bash'] },
+  { id: 'web', name: 'Web', description: 'Web browsing and search', tools: ['browser', 'web_search'] },
+  { id: 'all-coding', name: 'All Coding', description: 'All coding-related tools', tools: ['read', 'write', 'edit', 'bash', 'browser'] },
+];
+
 export class ToolRegistryImpl implements ToolRegistry {
   private tools: Map<string, Tool> = new Map();
+  private policy: ToolPolicy | undefined;
+  private groups: Map<string, ToolGroup> = new Map();
 
+  constructor() {
+    // Register standard groups by default
+    for (const group of STANDARD_GROUPS) {
+      this.groups.set(group.id, group);
+    }
+  }
+
+  // Core registration methods
   registerTool(tool: Tool): void {
     this.tools.set(tool.name, tool);
   }
@@ -34,6 +54,85 @@ export class ToolRegistryImpl implements ToolRegistry {
   clear(): void {
     this.tools.clear();
   }
+
+  // Category methods
+  getToolsByCategory(category: ToolCategory): Tool[] {
+    return this.getAllTools().filter((tool) => tool.category === category);
+  }
+
+  getCategories(): ToolCategory[] {
+    const categories = new Set<ToolCategory>();
+    for (const tool of this.tools.values()) {
+      categories.add(tool.category);
+    }
+    return Array.from(categories);
+  }
+
+  // Policy filtering methods
+  setPolicy(policy: ToolPolicy): void {
+    this.policy = policy;
+  }
+
+  getPolicy(): ToolPolicy | undefined {
+    return this.policy;
+  }
+
+  clearPolicy(): void {
+    this.policy = undefined;
+  }
+
+  isToolAllowed(name: string): boolean {
+    if (!this.policy) return true;
+
+    const tool = this.tools.get(name);
+    if (!tool) return false;
+
+    const { mode, tools, categories } = this.policy;
+
+    // Check if tool name is in the list
+    const nameMatch = tools?.includes(name) ?? false;
+
+    // Check if tool category is in the list
+    const categoryMatch = categories?.includes(tool.category) ?? false;
+
+    const inPolicy = nameMatch || categoryMatch;
+
+    // Allowlist: must be in policy to be allowed
+    // Denylist: must NOT be in policy to be allowed
+    return mode === 'allowlist' ? inPolicy : !inPolicy;
+  }
+
+  getFilteredTools(): Tool[] {
+    if (!this.policy) return this.getAllTools();
+    return this.getAllTools().filter((tool) => this.isToolAllowed(tool.name));
+  }
+
+  getFilteredToolDefinitions(): ToolDefinition[] {
+    return this.getFilteredTools().map((tool) => tool.definition);
+  }
+
+  // Group methods
+  registerGroup(group: ToolGroup): void {
+    this.groups.set(group.id, group);
+  }
+
+  getGroup(id: string): ToolGroup | undefined {
+    return this.groups.get(id);
+  }
+
+  getAllGroups(): ToolGroup[] {
+    return Array.from(this.groups.values());
+  }
+
+  getGroupTools(groupId: string): Tool[] {
+    const group = this.groups.get(groupId);
+    if (!group) return [];
+
+    return group.tools
+      .map((name) => this.tools.get(name))
+      .filter((tool): tool is Tool => tool !== undefined)
+      .filter((tool) => this.isToolAllowed(tool.name));
+  }
 }
 
 /**
@@ -54,6 +153,10 @@ export interface ToolRegistryOptions {
   voiceManager?: VoiceManager;
   /** Whether to include voice tool (default: true if voiceManager provided) */
   includeVoiceTool?: boolean;
+  /** Initial tool policy */
+  toolPolicy?: ToolPolicy;
+  /** Additional tool groups to register */
+  additionalGroups?: ToolGroup[];
 }
 
 /**
@@ -108,6 +211,18 @@ export async function createDefaultToolRegistry(
   const braveSearch = initializeBraveSearch();
   if (braveSearch) {
     registry.registerTool(braveSearch);
+  }
+
+  // Apply initial policy if provided
+  if (options.toolPolicy) {
+    registry.setPolicy(options.toolPolicy);
+  }
+
+  // Register additional groups
+  if (options.additionalGroups) {
+    for (const group of options.additionalGroups) {
+      registry.registerGroup(group);
+    }
   }
 
   return registry;

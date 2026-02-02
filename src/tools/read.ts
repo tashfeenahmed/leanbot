@@ -7,6 +7,7 @@ const MAX_FILE_SIZE = 1024 * 1024; // 1MB
 
 export class ReadTool implements Tool {
   name = 'read';
+  category = 'coding' as const;
   description = 'Read the contents of a file from the filesystem';
 
   definition: ToolDefinition = {

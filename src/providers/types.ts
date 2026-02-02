@@ -107,6 +107,8 @@ export interface LLMProvider {
 // Provider configuration
 export interface ProviderOptions {
   apiKey: string;
+  /** Multiple API keys for rotation on auth errors */
+  apiKeys?: string[];
   model?: string;
   baseUrl?: string;
   maxRetries?: number;

@@ -4,6 +4,7 @@ import type { ToolDefinition } from '../providers/types.js';
 
 export class EditTool implements Tool {
   name = 'edit';
+  category = 'coding' as const;
   description = 'Find and replace text in a file';
 
   definition: ToolDefinition = {

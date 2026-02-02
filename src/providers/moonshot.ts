@@ -63,23 +63,49 @@ export class MoonshotProvider implements LLMProvider {
   };
 
   private client: OpenAI;
-  private apiKey: string;
+  private apiKeys: string[];
+  private currentKeyIndex: number = 0;
   private maxRetries: number;
+  private baseUrl: string;
+  private timeout?: number;
 
   constructor(options: ProviderOptions) {
-    this.apiKey = options.apiKey;
+    // Support both single apiKey and multiple apiKeys
+    this.apiKeys = options.apiKeys?.length ? options.apiKeys : [options.apiKey];
     this.model = options.model || DEFAULT_MODEL;
     this.maxRetries = options.maxRetries || DEFAULT_MAX_RETRIES;
+    this.baseUrl = options.baseUrl || DEFAULT_BASE_URL;
+    this.timeout = options.timeout;
 
     this.client = new OpenAI({
-      apiKey: this.apiKey,
-      baseURL: options.baseUrl || DEFAULT_BASE_URL,
-      ...(options.timeout && { timeout: options.timeout }),
+      apiKey: this.apiKeys[0],
+      baseURL: this.baseUrl,
+      ...(this.timeout && { timeout: this.timeout }),
     });
   }
 
   isAvailable(): boolean {
-    return !!this.apiKey && this.apiKey.length > 0;
+    return this.apiKeys.length > 0 && this.apiKeys[0].length > 0;
+  }
+
+  /**
+   * Rotate to next API key on auth errors
+   * Returns true if there are more keys to try
+   */
+  private rotateApiKey(): boolean {
+    if (this.apiKeys.length <= 1) return false;
+
+    this.currentKeyIndex = (this.currentKeyIndex + 1) % this.apiKeys.length;
+    const newKey = this.apiKeys[this.currentKeyIndex];
+
+    this.client = new OpenAI({
+      apiKey: newKey,
+      baseURL: this.baseUrl,
+      ...(this.timeout && { timeout: this.timeout }),
+    });
+
+    console.log(`[MOONSHOT] Rotated to API key ${this.currentKeyIndex + 1}/${this.apiKeys.length}`);
+    return this.currentKeyIndex !== 0; // true if we haven't cycled back to start
   }
 
   async complete(request: CompletionRequest): Promise<CompletionResponse> {
@@ -286,6 +312,8 @@ export class MoonshotProvider implements LLMProvider {
 
   private async executeWithRetry<T>(fn: () => Promise<T>): Promise<T> {
     let lastError: Error | undefined;
+    let keyRotationAttempts = 0;
+    const maxKeyRotations = this.apiKeys.length;
 
     for (let attempt = 0; attempt < this.maxRetries; attempt++) {
       try {
@@ -294,9 +322,19 @@ export class MoonshotProvider implements LLMProvider {
         lastError = error as Error;
 
         if (error instanceof OpenAI.APIError) {
+          // Retry on rate limits and server errors
           if (RETRY_STATUS_CODES.includes(error.status)) {
             await this.delay(RETRY_DELAY_MS * Math.pow(2, attempt));
             continue;
+          }
+
+          // Rotate API key on auth errors (401, 403)
+          if ((error.status === 401 || error.status === 403) && keyRotationAttempts < maxKeyRotations) {
+            keyRotationAttempts++;
+            if (this.rotateApiKey()) {
+              attempt--; // Don't count this as a retry attempt
+              continue;
+            }
           }
         }
 

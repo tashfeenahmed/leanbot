@@ -31,6 +31,7 @@ export function getSkillRegistry(): SkillRegistry | null {
  */
 export class SkillTool implements Tool {
   name = 'Skill';
+  category = 'meta' as const;
   description = 'Execute a skill by name. Skills provide specialized capabilities for common tasks.';
 
   definition: ToolDefinition = {

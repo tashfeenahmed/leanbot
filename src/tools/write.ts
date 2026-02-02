@@ -5,6 +5,7 @@ import type { ToolDefinition } from '../providers/types.js';
 
 export class WriteTool implements Tool {
   name = 'write';
+  category = 'coding' as const;
   description = 'Write content to a file, creating parent directories if needed';
 
   definition: ToolDefinition = {

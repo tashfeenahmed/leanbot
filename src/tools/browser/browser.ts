@@ -26,6 +26,7 @@ import { BrowserSession } from './session.js';
 
 export class BrowserTool implements Tool {
   name = 'browser';
+  category = 'browser' as const;
   description = 'Control a web browser for automation tasks';
 
   definition: ToolDefinition = {

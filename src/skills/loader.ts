@@ -37,7 +37,7 @@ export interface SkillLoaderEvents {
  */
 const DEFAULT_LOCAL_DIR = join(homedir(), '.scallopbot', 'skills');
 const WORKSPACE_SKILL_DIR = '.scallopbot/skills';
-const BUNDLED_SKILL_DIR = join(dirname(import.meta.url.replace('file://', '')), '..', '..', 'skills');
+const BUNDLED_SKILL_DIR = join(dirname(import.meta.url.replace('file://', '')), 'bundled');
 
 /**
  * Gate check result
