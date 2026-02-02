@@ -49,7 +49,7 @@ export class VoiceReplyTool implements Tool {
 
   constructor(config: VoiceToolConfig) {
     this.voiceManager = config.voiceManager;
-    this.defaultVoice = config.defaultVoice || 'af_heart';
+    this.defaultVoice = config.defaultVoice || 'am_adam'; // Male voice by default
   }
 
   async execute(input: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {

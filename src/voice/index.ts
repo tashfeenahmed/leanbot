@@ -48,7 +48,7 @@ export class VoiceManager {
     const useLocalSTT = process.env.VOICE_LOCAL_STT !== 'false';
     const useLocalTTS = process.env.VOICE_LOCAL_TTS !== 'false';
     const sttModel = (process.env.VOICE_STT_MODEL || 'small') as 'tiny' | 'base' | 'small' | 'medium';
-    const ttsVoice = (process.env.VOICE_TTS_VOICE || 'af_heart') as 'af_heart' | 'af_bella' | 'am_adam';
+    const ttsVoice = (process.env.VOICE_TTS_VOICE || 'am_adam') as 'af_heart' | 'af_bella' | 'am_adam';
 
     return new VoiceManager({
       stt: {

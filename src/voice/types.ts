@@ -66,6 +66,6 @@ export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
     preferLocal: true,
     localProvider: 'kokoro', // Lightweight 82M params, high quality
     cloudProvider: 'openai',
-    voice: 'af_heart', // Warm, expressive voice
+    voice: 'am_adam', // Deep, authoritative male voice
   },
 };
