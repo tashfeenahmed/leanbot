@@ -621,4 +621,198 @@ New content.
       expect(registry.hasSkill('new-skill')).toBe(true);
     });
   });
+
+  describe('generateSkillPrompt (rich)', () => {
+    it('should include full skill instructions when enabled', () => {
+      const prompt = registry.generateSkillPrompt({ includeInstructions: true });
+
+      expect(prompt).toContain('Available skill content');
+    });
+
+    it('should not include instructions when disabled', () => {
+      const prompt = registry.generateSkillPrompt({ includeInstructions: false });
+
+      expect(prompt).not.toContain('Available skill content');
+    });
+  });
+});
+
+describe('Skills Hot Reload', () => {
+  let testDir: string;
+  let loader: SkillLoader;
+
+  beforeEach(async () => {
+    testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'leanbot-hotreload-test-'));
+  });
+
+  afterEach(async () => {
+    if (loader?.isCurrentlyWatching()) {
+      await loader.stopWatching();
+    }
+    await fs.rm(testDir, { recursive: true, force: true });
+  });
+
+  describe('watch mode', () => {
+    it('should start and stop watching', async () => {
+      const skillsDir = path.join(testDir, 'skills');
+      await fs.mkdir(skillsDir, { recursive: true });
+
+      loader = new SkillLoader({
+        localDir: skillsDir,
+        watch: true,
+      });
+
+      await loader.loadAll();
+
+      expect(loader.isCurrentlyWatching()).toBe(false);
+      await loader.startWatching();
+      expect(loader.isCurrentlyWatching()).toBe(true);
+      await loader.stopWatching();
+      expect(loader.isCurrentlyWatching()).toBe(false);
+    });
+
+    it('should emit events when new skills are added', async () => {
+      const skillsDir = path.join(testDir, 'skills');
+      await fs.mkdir(skillsDir, { recursive: true });
+
+      loader = new SkillLoader({
+        localDir: skillsDir,
+        watch: true,
+      });
+
+      await loader.loadAll();
+
+      const addPromise = new Promise<string>((resolve) => {
+        loader.on('skill:added', (name) => resolve(name));
+      });
+
+      await loader.startWatching();
+
+      // Small delay to ensure watcher is ready
+      await new Promise((r) => setTimeout(r, 100));
+
+      // Add a new skill
+      const newSkillDir = path.join(skillsDir, 'new-watched-skill');
+      await fs.mkdir(newSkillDir, { recursive: true });
+      await fs.writeFile(
+        path.join(newSkillDir, 'SKILL.md'),
+        `---
+name: new-watched-skill
+description: A newly added skill
+---
+
+New skill content.
+`
+      );
+
+      const addedName = await Promise.race([
+        addPromise,
+        new Promise<string>((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout')), 3000)
+        ),
+      ]);
+
+      expect(addedName).toBe('new-watched-skill');
+      expect(loader.getSkill('new-watched-skill')).toBeDefined();
+    });
+
+    it('should register event handlers', () => {
+      loader = new SkillLoader({
+        localDir: path.join(testDir, 'skills'),
+        watch: true,
+      });
+
+      const handler = vi.fn();
+      loader.on('skill:changed', handler);
+      loader.on('skill:added', handler);
+      loader.on('skill:removed', handler);
+
+      // Just verify no errors are thrown
+      expect(true).toBe(true);
+    });
+  });
+});
+
+describe('XDG Path Support', () => {
+  let testDir: string;
+  let loader: SkillLoader;
+  let originalXdgConfig: string | undefined;
+
+  beforeEach(async () => {
+    testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'leanbot-xdg-test-'));
+    originalXdgConfig = process.env.XDG_CONFIG_HOME;
+  });
+
+  afterEach(async () => {
+    if (originalXdgConfig !== undefined) {
+      process.env.XDG_CONFIG_HOME = originalXdgConfig;
+    } else {
+      delete process.env.XDG_CONFIG_HOME;
+    }
+    await fs.rm(testDir, { recursive: true, force: true });
+  });
+
+  it('should expand $XDG_CONFIG_HOME in config paths', async () => {
+    const xdgDir = path.join(testDir, 'xdg-config');
+    process.env.XDG_CONFIG_HOME = xdgDir;
+
+    // Create a config file
+    const configPath = path.join(xdgDir, 'myapp', 'config.json');
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    await fs.writeFile(configPath, '{}');
+
+    // Create skill that requires this config
+    const skillDir = path.join(testDir, 'skills', 'xdg-skill');
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      `---
+name: xdg-skill
+description: Uses XDG config
+metadata:
+  openclaw:
+    requires:
+      config:
+        - $XDG_CONFIG_HOME/myapp/config.json
+---
+
+Content.
+`
+    );
+
+    loader = new SkillLoader({ localDir: path.join(testDir, 'skills') });
+    const skills = await loader.loadAll();
+    const skill = skills.find((s) => s.name === 'xdg-skill');
+
+    expect(skill?.available).toBe(true);
+  });
+
+  it('should fail gate when XDG config file missing', async () => {
+    process.env.XDG_CONFIG_HOME = path.join(testDir, 'nonexistent');
+
+    const skillDir = path.join(testDir, 'skills', 'xdg-missing-skill');
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      `---
+name: xdg-missing-skill
+description: Missing XDG config
+metadata:
+  openclaw:
+    requires:
+      config:
+        - $XDG_CONFIG_HOME/missing/config.json
+---
+
+Content.
+`
+    );
+
+    loader = new SkillLoader({ localDir: path.join(testDir, 'skills') });
+    const skills = await loader.loadAll();
+    const skill = skills.find((s) => s.name === 'xdg-missing-skill');
+
+    expect(skill?.available).toBe(false);
+    expect(skill?.unavailableReason).toContain('config');
+  });
 });

@@ -413,3 +413,17 @@ describe('Gate checking', () => {
     expect(result.error).toContain('NONEXISTENT_ENV_VAR_XYZ_123');
   });
 });
+
+describe('SDK source type', () => {
+  it('should mark SDK skills with source "sdk"', () => {
+    const skillDef = defineSkill('test-skill', 'Test').build();
+
+    expect(skillDef.skill.source).toBe('sdk');
+  });
+
+  it('should have path prefix "sdk:"', () => {
+    const skillDef = defineSkill('test-skill', 'Test').build();
+
+    expect(skillDef.skill.path).toBe('sdk:test-skill');
+  });
+});

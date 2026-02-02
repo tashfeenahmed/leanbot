@@ -15,6 +15,16 @@ import { SkillLoader } from './loader.js';
 export type SkillHandler = (skill: Skill, context: SkillContext) => Promise<SkillResult>;
 
 /**
+ * Options for generating skill prompts
+ */
+export interface GenerateSkillPromptOptions {
+  /** Include full skill instructions in prompt (default: false) */
+  includeInstructions?: boolean;
+  /** Maximum instruction length per skill (default: 500) */
+  maxInstructionLength?: number;
+}
+
+/**
  * Skill Registry
  */
 export class SkillRegistry {
@@ -185,7 +195,8 @@ export class SkillRegistry {
   /**
    * Generate skill descriptions for model prompt
    */
-  generateSkillPrompt(): string {
+  generateSkillPrompt(options: GenerateSkillPromptOptions = {}): string {
+    const { includeInstructions = false, maxInstructionLength = 500 } = options;
     const skills = this.getModelSkills();
 
     if (skills.length === 0) {
@@ -202,6 +213,17 @@ export class SkillRegistry {
     for (const skill of skills) {
       const emoji = skill.frontmatter.metadata?.openclaw?.emoji || '';
       lines.push(`- **${skill.name}**${emoji ? ` ${emoji}` : ''}: ${skill.description}`);
+
+      if (includeInstructions && skill.content.trim()) {
+        const content = skill.content.trim();
+        const truncated =
+          content.length > maxInstructionLength
+            ? content.slice(0, maxInstructionLength) + '...'
+            : content;
+        lines.push('');
+        lines.push(`  Instructions: ${truncated}`);
+        lines.push('');
+      }
     }
 
     lines.push('');

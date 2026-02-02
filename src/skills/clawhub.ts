@@ -7,6 +7,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { homedir } from 'os';
+import { createHash } from 'crypto';
 import type { Logger } from 'pino';
 import { parseFrontmatter } from './parser.js';
 import { checkGates } from './loader.js';
@@ -43,6 +44,17 @@ export interface InstallResult {
   skill?: Skill;
   error?: string;
   path?: string;
+  checksum?: string;
+}
+
+/**
+ * Version metadata for installed skills
+ */
+interface VersionMetadata {
+  version: string;
+  installedAt: string;
+  checksum: string;
+  sourceUrl?: string;
 }
 
 export interface SkillPackageManagerOptions {
@@ -146,6 +158,13 @@ export class SkillPackageManager {
   }
 
   /**
+   * Compute SHA-256 checksum of content
+   */
+  private computeChecksum(content: string): string {
+    return createHash('sha256').update(content).digest('hex');
+  }
+
+  /**
    * Install a skill from a URL
    */
   async installFromUrl(name: string, url: string): Promise<InstallResult> {
@@ -160,6 +179,9 @@ export class SkillPackageManager {
       }
 
       const content = await response.text();
+
+      // Compute checksum
+      const checksum = this.computeChecksum(content);
 
       // Validate skill format
       let parsed: { frontmatter: SkillFrontmatter; content: string };
@@ -183,6 +205,19 @@ export class SkillPackageManager {
       const skillPath = path.join(skillDir, 'SKILL.md');
       await fs.writeFile(skillPath, content, 'utf-8');
 
+      // Write version metadata
+      const versionMeta: VersionMetadata = {
+        version: '1.0.0', // Default version
+        installedAt: new Date().toISOString(),
+        checksum,
+        sourceUrl: url,
+      };
+      await fs.writeFile(
+        path.join(skillDir, '.version.json'),
+        JSON.stringify(versionMeta, null, 2),
+        'utf-8'
+      );
+
       // Check gates
       const gateResult = checkGates(parsed.frontmatter.metadata);
 
@@ -198,7 +233,7 @@ export class SkillPackageManager {
       };
 
       this.logger?.info(
-        { name: skillName, path: skillPath, available: skill.available },
+        { name: skillName, path: skillPath, available: skill.available, checksum },
         'Skill installed'
       );
 
@@ -206,6 +241,7 @@ export class SkillPackageManager {
         success: true,
         skill,
         path: skillPath,
+        checksum,
       };
     } catch (error) {
       return {
@@ -213,6 +249,165 @@ export class SkillPackageManager {
         error: `Installation failed: ${(error as Error).message}`,
       };
     }
+  }
+
+  /**
+   * Install a skill with checksum verification
+   */
+  async installWithChecksum(
+    name: string,
+    url: string,
+    expectedChecksum: string
+  ): Promise<InstallResult> {
+    try {
+      // Fetch skill content
+      const response = await fetch(url);
+      if (!response.ok) {
+        return {
+          success: false,
+          error: `Failed to download skill: HTTP ${response.status}`,
+        };
+      }
+
+      const content = await response.text();
+
+      // Verify checksum
+      const actualChecksum = this.computeChecksum(content);
+      if (actualChecksum !== expectedChecksum) {
+        return {
+          success: false,
+          error: `Checksum mismatch: expected ${expectedChecksum}, got ${actualChecksum}`,
+        };
+      }
+
+      // Validate skill format
+      let parsed: { frontmatter: SkillFrontmatter; content: string };
+      try {
+        parsed = parseFrontmatter(content, url);
+      } catch (parseError) {
+        return {
+          success: false,
+          error: `Invalid skill format: ${(parseError as Error).message}`,
+        };
+      }
+
+      // Use name from frontmatter or provided name
+      const skillName = parsed.frontmatter.name || name;
+
+      // Create skill directory
+      const skillDir = path.join(this.skillsDir, skillName);
+      await fs.mkdir(skillDir, { recursive: true });
+
+      // Write SKILL.md
+      const skillPath = path.join(skillDir, 'SKILL.md');
+      await fs.writeFile(skillPath, content, 'utf-8');
+
+      // Write version metadata
+      const versionMeta: VersionMetadata = {
+        version: '1.0.0',
+        installedAt: new Date().toISOString(),
+        checksum: actualChecksum,
+        sourceUrl: url,
+      };
+      await fs.writeFile(
+        path.join(skillDir, '.version.json'),
+        JSON.stringify(versionMeta, null, 2),
+        'utf-8'
+      );
+
+      // Check gates
+      const gateResult = checkGates(parsed.frontmatter.metadata);
+
+      const skill: Skill = {
+        name: skillName,
+        description: parsed.frontmatter.description,
+        path: skillPath,
+        source: 'local',
+        frontmatter: parsed.frontmatter,
+        content: parsed.content,
+        available: gateResult.available,
+        unavailableReason: gateResult.reason,
+      };
+
+      this.logger?.info(
+        { name: skillName, path: skillPath, available: skill.available, checksum: actualChecksum },
+        'Skill installed with verified checksum'
+      );
+
+      return {
+        success: true,
+        skill,
+        path: skillPath,
+        checksum: actualChecksum,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: `Installation failed: ${(error as Error).message}`,
+      };
+    }
+  }
+
+  /**
+   * Get installed version of a skill
+   */
+  async getInstalledVersion(name: string): Promise<string | null> {
+    try {
+      const versionPath = path.join(this.skillsDir, name, '.version.json');
+      const content = await fs.readFile(versionPath, 'utf-8');
+      const meta: VersionMetadata = JSON.parse(content);
+      return meta.version;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Check if an update is available for a skill
+   */
+  async hasUpdate(name: string): Promise<{ available: boolean; currentVersion?: string; latestVersion?: string } | null> {
+    try {
+      const currentVersion = await this.getInstalledVersion(name);
+      if (!currentVersion) {
+        return null;
+      }
+
+      const pkg = await this.getPackage(name);
+      if (!pkg) {
+        return null;
+      }
+
+      return {
+        available: pkg.version !== currentVersion,
+        currentVersion,
+        latestVersion: pkg.version,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Check if installed version is compatible with minimum requirement
+   */
+  async isVersionCompatible(name: string, minVersion: string): Promise<boolean> {
+    const currentVersion = await this.getInstalledVersion(name);
+    if (!currentVersion) {
+      return false;
+    }
+
+    // Simple semver comparison (major.minor.patch)
+    const current = currentVersion.split('.').map(Number);
+    const min = minVersion.split('.').map(Number);
+
+    for (let i = 0; i < 3; i++) {
+      const c = current[i] || 0;
+      const m = min[i] || 0;
+      if (c > m) return true;
+      if (c < m) return false;
+    }
+
+    return true; // Equal versions
   }
 
   /**

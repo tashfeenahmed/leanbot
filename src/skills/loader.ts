@@ -13,14 +13,24 @@
  * - Platform (darwin, linux, win32)
  */
 
-import { readdir, readFile, access } from 'fs/promises';
-import { join, resolve, dirname } from 'path';
+import { readdir, readFile, access, watch } from 'fs/promises';
+import { join, resolve, dirname, basename } from 'path';
 import { execSync } from 'child_process';
 import { homedir, platform } from 'os';
 import { constants } from 'fs';
+import { EventEmitter } from 'events';
 import type { Logger } from 'pino';
 import type { Skill, SkillLoaderConfig, SkillMetadata } from './types.js';
 import { parseFrontmatter, SkillParseError } from './parser.js';
+
+/**
+ * Skill loader events
+ */
+export interface SkillLoaderEvents {
+  'skill:changed': (name: string) => void;
+  'skill:added': (name: string) => void;
+  'skill:removed': (name: string) => void;
+}
 
 /**
  * Default skill directories
@@ -123,9 +133,9 @@ interface LoaderGateResult {
 }
 
 /**
- * Skill Loader
+ * Skill Loader with hot-reload support
  */
-export class SkillLoader {
+export class SkillLoader extends EventEmitter {
   private config: {
     workspaceDir?: string;
     localDir: string;
@@ -134,8 +144,11 @@ export class SkillLoader {
   };
   private logger: Logger | null;
   private skillCache: Map<string, Skill> = new Map();
+  private watchers: AbortController[] = [];
+  private isWatching = false;
 
   constructor(config: SkillLoaderConfig = {}, logger?: Logger) {
+    super();
     this.config = {
       workspaceDir: config.workspaceDir,
       localDir: config.localDir || DEFAULT_LOCAL_DIR,
@@ -143,6 +156,23 @@ export class SkillLoader {
       watch: config.watch ?? false,
     };
     this.logger = logger?.child({ module: 'skill-loader' }) || null;
+  }
+
+  /**
+   * Type-safe event emitter methods
+   */
+  override on<K extends keyof SkillLoaderEvents>(
+    event: K,
+    listener: SkillLoaderEvents[K]
+  ): this {
+    return super.on(event, listener);
+  }
+
+  override emit<K extends keyof SkillLoaderEvents>(
+    event: K,
+    ...args: Parameters<SkillLoaderEvents[K]>
+  ): boolean {
+    return super.emit(event, ...args);
   }
 
   /**
@@ -349,7 +379,7 @@ export class SkillLoader {
     // Check required config files
     if (oc.requires?.config?.length) {
       for (const configPath of oc.requires.config) {
-        const resolvedPath = configPath.replace(/^~/, homedir());
+        const resolvedPath = this.expandPath(configPath);
         try {
           await access(resolvedPath, constants.R_OK);
         } catch {
@@ -375,6 +405,25 @@ export class SkillLoader {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Expand environment variables and ~ in paths
+   * Supports: ~, $VAR, ${VAR}
+   */
+  private expandPath(inputPath: string): string {
+    let result = inputPath;
+
+    // Expand ~ to home directory
+    result = result.replace(/^~/, homedir());
+
+    // Expand $VAR and ${VAR} patterns
+    result = result.replace(/\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (_, braced, unbraced) => {
+      const varName = braced || unbraced;
+      return process.env[varName] || '';
+    });
+
+    return result;
   }
 
   /**
@@ -407,6 +456,11 @@ export class SkillLoader {
       return null;
     }
 
+    // SDK skills cannot be reloaded from file
+    if (existing.source === 'sdk') {
+      return existing;
+    }
+
     const reloaded = await this.loadSkillFile(existing.path, existing.source);
     if (reloaded) {
       this.skillCache.set(name, reloaded);
@@ -419,6 +473,172 @@ export class SkillLoader {
    */
   clearCache(): void {
     this.skillCache.clear();
+  }
+
+  /**
+   * Start watching skill directories for changes
+   */
+  async startWatching(): Promise<void> {
+    if (this.isWatching) {
+      return;
+    }
+
+    this.isWatching = true;
+    const dirsToWatch: string[] = [];
+
+    // Collect directories to watch
+    if (this.config.workspaceDir) {
+      const workspaceSkillsDir = join(this.config.workspaceDir, WORKSPACE_SKILL_DIR);
+      dirsToWatch.push(workspaceSkillsDir);
+    }
+
+    dirsToWatch.push(this.config.localDir);
+    dirsToWatch.push(...this.config.extraDirs);
+
+    // Start watchers for each directory
+    for (const dir of dirsToWatch) {
+      this.watchDirectory(dir);
+    }
+
+    this.logger?.info({ dirs: dirsToWatch }, 'Started watching skill directories');
+  }
+
+  /**
+   * Watch a single directory for changes
+   */
+  private async watchDirectory(dir: string): Promise<void> {
+    try {
+      const resolvedDir = resolve(dir);
+      await access(resolvedDir, constants.R_OK);
+
+      const controller = new AbortController();
+      this.watchers.push(controller);
+
+      // Watch directory recursively
+      this.watchDirectoryRecursive(resolvedDir, controller.signal);
+    } catch (error) {
+      // Directory doesn't exist - not an error
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        this.logger?.warn({ dir, error: (error as Error).message }, 'Failed to watch directory');
+      }
+    }
+  }
+
+  /**
+   * Recursively watch a directory and its subdirectories
+   */
+  private async watchDirectoryRecursive(dir: string, signal: AbortSignal): Promise<void> {
+    try {
+      const watcher = watch(dir, { recursive: true, signal });
+
+      for await (const event of watcher) {
+        if (signal.aborted) break;
+
+        const filename = event.filename;
+        if (!filename) continue;
+
+        // Only care about SKILL.md files
+        if (basename(filename) !== 'SKILL.md' && !filename.endsWith('/SKILL.md') && !filename.endsWith('\\SKILL.md')) {
+          continue;
+        }
+
+        const fullPath = join(dir, filename);
+        await this.handleFileChange(event.eventType, fullPath, dir);
+      }
+    } catch (error) {
+      if ((error as Error).name !== 'AbortError') {
+        this.logger?.warn({ dir, error: (error as Error).message }, 'Watch error');
+      }
+    }
+  }
+
+  /**
+   * Handle a file change event
+   */
+  private async handleFileChange(
+    eventType: string,
+    filePath: string,
+    baseDir: string
+  ): Promise<void> {
+    // Debounce rapid events
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    try {
+      // Try to load the skill file
+      const source = this.getSourceForDir(baseDir);
+      const skill = await this.loadSkillFile(filePath, source);
+
+      if (skill) {
+        const existingSkill = this.skillCache.get(skill.name);
+
+        if (existingSkill) {
+          // Skill was modified
+          this.skillCache.set(skill.name, skill);
+          this.emit('skill:changed', skill.name);
+          this.logger?.info({ name: skill.name }, 'Skill changed');
+        } else {
+          // New skill added
+          this.skillCache.set(skill.name, skill);
+          this.emit('skill:added', skill.name);
+          this.logger?.info({ name: skill.name }, 'Skill added');
+        }
+      }
+    } catch (error) {
+      // File might have been deleted
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        // Find and remove skill that had this path
+        for (const [name, skill] of this.skillCache.entries()) {
+          if (skill.path === filePath) {
+            this.skillCache.delete(name);
+            this.emit('skill:removed', name);
+            this.logger?.info({ name }, 'Skill removed');
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Get source type for a directory
+   */
+  private getSourceForDir(dir: string): 'workspace' | 'local' | 'bundled' {
+    if (this.config.workspaceDir) {
+      const workspaceSkillsDir = join(this.config.workspaceDir, WORKSPACE_SKILL_DIR);
+      if (resolve(dir).startsWith(resolve(workspaceSkillsDir))) {
+        return 'workspace';
+      }
+    }
+
+    if (resolve(dir).startsWith(resolve(BUNDLED_SKILL_DIR))) {
+      return 'bundled';
+    }
+
+    return 'local';
+  }
+
+  /**
+   * Stop watching skill directories
+   */
+  async stopWatching(): Promise<void> {
+    if (!this.isWatching) {
+      return;
+    }
+
+    for (const controller of this.watchers) {
+      controller.abort();
+    }
+
+    this.watchers = [];
+    this.isWatching = false;
+    this.logger?.info('Stopped watching skill directories');
+  }
+
+  /**
+   * Check if currently watching
+   */
+  isCurrentlyWatching(): boolean {
+    return this.isWatching;
   }
 }
 

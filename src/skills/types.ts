@@ -81,8 +81,8 @@ export interface Skill {
   description: string;
   /** Full path to SKILL.md file */
   path: string;
-  /** Source directory (workspace, local, bundled) */
-  source: 'workspace' | 'local' | 'bundled';
+  /** Source directory (workspace, local, bundled, sdk) */
+  source: 'workspace' | 'local' | 'bundled' | 'sdk';
   /** Parsed frontmatter */
   frontmatter: SkillFrontmatter;
   /** Markdown content (instructions for agent) */

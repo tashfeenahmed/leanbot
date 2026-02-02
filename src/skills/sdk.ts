@@ -281,7 +281,7 @@ export class SkillBuilder {
       name: this.name,
       description: this.description,
       path: `sdk:${this.name}`,
-      source: 'workspace',
+      source: 'sdk',
       frontmatter,
       content: this.options.instructions || '',
       available: gateResult.available,
