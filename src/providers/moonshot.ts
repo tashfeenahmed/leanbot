@@ -113,6 +113,11 @@ export class MoonshotProvider implements LLMProvider {
         finishReason: response.choices[0]?.finish_reason,
         hasToolCalls: !!response.choices[0]?.message?.tool_calls,
         toolCallCount: response.choices[0]?.message?.tool_calls?.length || 0,
+        toolCalls: response.choices[0]?.message?.tool_calls?.map(tc => ({
+          id: tc.id,
+          type: tc.type,
+          functionName: 'function' in tc ? tc.function?.name : 'unknown',
+        })),
         contentLength: response.choices[0]?.message?.content?.length || 0,
         usage: response.usage,
       }));
