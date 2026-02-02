@@ -51,6 +51,16 @@ const createMockConfig = (testDir: string, overrides: Record<string, unknown> = 
     maxToolOutputBytes: 30000,
     ...((overrides.context as Record<string, unknown>) || {}),
   },
+  gateway: {
+    port: 3000,
+    host: '127.0.0.1',
+    ...((overrides.gateway as Record<string, unknown>) || {}),
+  },
+  tailscale: {
+    mode: 'off' as const,
+    resetOnExit: true,
+    ...((overrides.tailscale as Record<string, unknown>) || {}),
+  },
 });
 
 describe('Gateway', () => {

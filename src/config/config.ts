@@ -87,6 +87,20 @@ const contextSchema = z.object({
   maxToolOutputBytes: z.number().int().positive().default(30000),
 });
 
+// Gateway configuration schema
+const gatewaySchema = z.object({
+  port: z.number().int().positive().default(3000),
+  host: z.string().default('127.0.0.1'),
+});
+
+// Tailscale configuration schema
+const tailscaleSchema = z.object({
+  mode: z.enum(['off', 'serve', 'funnel']).default('off'),
+  hostname: z.string().optional(),
+  port: z.number().int().positive().optional(),
+  resetOnExit: z.boolean().default(true),
+});
+
 // Main configuration schema
 export const configSchema = z.object({
   providers: providersSchema,
@@ -96,6 +110,8 @@ export const configSchema = z.object({
   routing: routingSchema.default({ providerOrder: ['anthropic', 'openai', 'groq', 'ollama'], enableComplexityAnalysis: true }),
   cost: costSchema.default({ warningThreshold: 0.75 }),
   context: contextSchema.default({ hotWindowSize: 5, maxContextTokens: 128000, compressionThreshold: 0.7, maxToolOutputBytes: 30000 }),
+  gateway: gatewaySchema.default({ port: 3000, host: '127.0.0.1' }),
+  tailscale: tailscaleSchema.default({ mode: 'off', resetOnExit: true }),
 });
 
 // Type inference from schema
@@ -107,6 +123,8 @@ export type LoggingConfig = z.infer<typeof loggingSchema>;
 export type RoutingConfig = z.infer<typeof routingSchema>;
 export type CostConfig = z.infer<typeof costSchema>;
 export type ContextConfig = z.infer<typeof contextSchema>;
+export type GatewayConfig = z.infer<typeof gatewaySchema>;
+export type TailscaleConfig = z.infer<typeof tailscaleSchema>;
 
 /**
  * Load configuration from environment variables
@@ -186,6 +204,16 @@ export function loadConfig(): Config {
       maxContextTokens: process.env.MAX_CONTEXT_TOKENS ? parseInt(process.env.MAX_CONTEXT_TOKENS, 10) : 128000,
       compressionThreshold: process.env.COMPRESSION_THRESHOLD ? parseFloat(process.env.COMPRESSION_THRESHOLD) : 0.7,
       maxToolOutputBytes: process.env.MAX_TOOL_OUTPUT_BYTES ? parseInt(process.env.MAX_TOOL_OUTPUT_BYTES, 10) : 30000,
+    },
+    gateway: {
+      port: process.env.GATEWAY_PORT ? parseInt(process.env.GATEWAY_PORT, 10) : 3000,
+      host: process.env.GATEWAY_HOST || '127.0.0.1',
+    },
+    tailscale: {
+      mode: (process.env.TAILSCALE_MODE as 'off' | 'serve' | 'funnel') || 'off',
+      hostname: process.env.TAILSCALE_HOSTNAME || undefined,
+      port: process.env.TAILSCALE_PORT ? parseInt(process.env.TAILSCALE_PORT, 10) : undefined,
+      resetOnExit: process.env.TAILSCALE_RESET_ON_EXIT !== 'false',
     },
   };
 
