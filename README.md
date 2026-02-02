@@ -5,6 +5,9 @@ A personal AI assistant that runs on your VPS, accessible via Telegram, with ful
 ## Features
 
 - **Telegram Integration**: Chat with your bot from anywhere
+- **Interactive Onboarding**: Set up bot name, personality, and model on first use
+- **Multi-Provider Support**: Claude, GPT-4o, Kimi K2.5, Grok, Llama via Groq
+- **Admin Whitelist**: Restrict bot access to specific Telegram user IDs
 - **Full VPS Access**: Read/write files, execute commands, no sandbox restrictions
 - **Session Persistence**: Conversations survive restarts (JSONL storage)
 - **Core Tools**: Read, Write, Edit, Bash - everything you need
@@ -76,8 +79,18 @@ leanbot chat --session <session-id>
 
 | Command | Description |
 |---------|-------------|
-| `/start` | Welcome message |
+| `/start` | Welcome message (triggers onboarding for new users) |
+| `/help` | Show all available commands |
+| `/settings` | View your bot configuration |
+| `/setup` | Reconfigure bot (name, personality, model) |
 | `/reset` | Clear conversation history |
+
+### First-Time Setup
+
+When you first message the bot, it will guide you through setup:
+1. **Name**: Choose what to call your bot (Jarvis, Friday, etc.)
+2. **Personality**: Professional, Friendly, Technical, Creative, or Custom
+3. **Model**: Claude Sonnet (default), Claude Opus, Kimi K2.5, Grok, GPT-4o, Llama
 
 ## Project Structure
 
@@ -114,11 +127,19 @@ npm run dev start
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | - | Anthropic API key |
+| `ANTHROPIC_API_KEY` | Yes* | - | Anthropic API key |
+| `OPENAI_API_KEY` | No | - | OpenAI API key |
+| `GROQ_API_KEY` | No | - | Groq API key (for Llama) |
+| `MOONSHOT_API_KEY` | No | - | Moonshot API key (for Kimi) |
+| `XAI_API_KEY` | No | - | xAI API key (for Grok) |
 | `TELEGRAM_BOT_TOKEN` | No | - | Telegram bot token |
+| `TELEGRAM_ALLOWED_USERS` | No | - | Comma-separated user IDs (empty = allow all) |
+| `TELEGRAM_VOICE_REPLY` | No | `false` | Reply with voice to voice messages |
 | `AGENT_WORKSPACE` | No | `cwd()` | Working directory for agent |
 | `AGENT_MAX_ITERATIONS` | No | `20` | Max tool calls per message |
 | `LOG_LEVEL` | No | `info` | Logging level |
+
+*At least one LLM provider API key is required.
 
 ### SOUL.md (Optional)
 
