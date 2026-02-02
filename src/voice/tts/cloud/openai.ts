@@ -8,8 +8,8 @@
 import OpenAI from 'openai';
 import type { TTSProvider, TTSOptions, TTSResult } from '../../types.js';
 
-const OPENAI_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const;
-type OpenAIVoice = typeof OPENAI_VOICES[number];
+const _OPENAI_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const;
+type OpenAIVoice = typeof _OPENAI_VOICES[number];
 
 export interface OpenAITTSConfig {
   apiKey: string;

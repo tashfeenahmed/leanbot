@@ -80,17 +80,17 @@ except sr.RequestError as e:
 
       // Try using SpeechRecognition Python library if available
       // Fall back to a simpler approach if not
-      const result = await new Promise<string>((resolve, reject) => {
+      const result = await new Promise<string>((resolve, _reject) => {
         const proc = spawn('python3', ['-c', pythonScript]);
         let stdout = '';
-        let stderr = '';
+        let _stderr = '';
 
         proc.stdout.on('data', (data) => {
           stdout += data.toString();
         });
 
         proc.stderr.on('data', (data) => {
-          stderr += data.toString();
+          _stderr += data.toString();
         });
 
         proc.on('error', () => {

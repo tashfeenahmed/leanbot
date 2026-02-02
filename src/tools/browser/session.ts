@@ -7,8 +7,6 @@
  * Note: Requires optional dependency playwright
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import type { Logger } from 'pino';
 import type {
   BrowserSessionConfig,

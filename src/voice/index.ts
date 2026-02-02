@@ -10,12 +10,10 @@ import { STTRouter, type STTRouterConfig } from './stt/index.js';
 import { TTSRouter, type TTSRouterConfig } from './tts/index.js';
 import { AudioRecorder, AudioPlayer } from './audio.js';
 import type {
-  VoiceConfig,
   STTOptions,
   STTResult,
   TTSOptions,
   TTSResult,
-  DEFAULT_VOICE_CONFIG,
 } from './types.js';
 
 export interface VoiceManagerConfig {

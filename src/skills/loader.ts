@@ -13,7 +13,7 @@
  * - Platform (darwin, linux, win32)
  */
 
-import { readdir, readFile, stat, access } from 'fs/promises';
+import { readdir, readFile, access } from 'fs/promises';
 import { join, resolve, dirname } from 'path';
 import { execSync } from 'child_process';
 import { homedir, platform } from 'os';

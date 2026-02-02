@@ -13,7 +13,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { Logger } from 'pino';
-import type { Session, SessionManager, SessionMetadata } from './session.js';
+import type { SessionManager } from './session.js';
 import type { Message } from '../providers/types.js';
 
 /**

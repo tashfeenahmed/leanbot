@@ -6,14 +6,14 @@
  */
 
 import { spawn } from 'child_process';
-import { writeFile, readFile, unlink } from 'fs/promises';
+import { readFile, unlink } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { nanoid } from 'nanoid';
 import type { TTSProvider, TTSOptions, TTSResult } from '../../types.js';
 
 // Available high-quality macOS voices
-const MACOS_VOICES = [
+const _MACOS_VOICES = [
   'Alex',      // US English, male
   'Samantha',  // US English, female
   'Victoria',  // US English, female

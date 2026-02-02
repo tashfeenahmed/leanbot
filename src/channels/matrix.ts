@@ -16,8 +16,6 @@
  * Note: Requires optional dependency matrix-js-sdk
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import type { Logger } from 'pino';
 import type { Agent } from '../agent/agent.js';
 import type { SessionManager } from '../agent/session.js';

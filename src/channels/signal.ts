@@ -209,7 +209,7 @@ export class SignalChannel implements Channel, VoiceChannel {
           this.handleMessage(data.params);
         }
       }
-    } catch (error) {
+    } catch {
       // Not JSON, might be status message
       this.logger.debug({ line }, 'Non-JSON line from signal-cli');
     }

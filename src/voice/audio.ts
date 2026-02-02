@@ -90,7 +90,7 @@ export class AudioRecorder extends EventEmitter {
       this.emit('data', chunk);
     });
 
-    this.process.stderr?.on('data', (data) => {
+    this.process.stderr?.on('data', (_data) => {
       // Ignore stderr (progress info)
     });
 
@@ -120,7 +120,7 @@ export class AudioRecorder extends EventEmitter {
     }
 
     const proc = this.process;
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve, _reject) => {
       const timeout = setTimeout(() => {
         if (proc) {
           proc.kill('SIGKILL');

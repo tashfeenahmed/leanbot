@@ -81,7 +81,7 @@ export class PiperTTS implements TTSProvider {
         chunks.push(data);
       });
 
-      proc.stderr.on('data', (data) => {
+      proc.stderr.on('data', (_data) => {
         // Piper outputs progress to stderr, ignore it
       });
 

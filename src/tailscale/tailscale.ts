@@ -12,7 +12,7 @@
  * - For funnel: Tailscale v1.38.3+, MagicDNS enabled, HTTPS enabled
  */
 
-import { spawn, execSync } from 'child_process';
+import { execSync } from 'child_process';
 import type { Logger } from 'pino';
 import type {
   TailscaleConfig,
@@ -130,7 +130,7 @@ export class Tailscale {
 
         // Check web handlers
         if (status.Web) {
-          for (const [url, handlers] of Object.entries(status.Web)) {
+          for (const [url, _handlers] of Object.entries(status.Web)) {
             urls.push(url);
             // Check if funnel is enabled for this URL
             if (status.AllowFunnel?.[url]) {

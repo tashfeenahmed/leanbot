@@ -530,7 +530,7 @@ export class BackgroundGardener {
 
       // Check for similar content
       let isDuplicate = false;
-      for (const [existing, id] of seen) {
+      for (const [existing, _id] of seen) {
         if (this.isSimilar(normalized, existing)) {
           toDelete.push(fact.id);
           isDuplicate = true;
@@ -755,7 +755,7 @@ export class BackgroundGardener {
   /**
    * Detect if two facts contradict each other
    */
-  private detectContradiction(newer: string, older: string, category: string): boolean {
+  private detectContradiction(newer: string, older: string, _category: string): boolean {
     const newerLower = newer.toLowerCase();
     const olderLower = older.toLowerCase();
 

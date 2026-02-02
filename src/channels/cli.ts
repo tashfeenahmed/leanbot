@@ -176,7 +176,7 @@ export class CLIChannel {
   /**
    * Handle a command
    */
-  private async handleCommand(command: string, args: string): Promise<HandleResult> {
+  private async handleCommand(command: string, _args: string): Promise<HandleResult> {
     switch (command) {
       case 'help':
         this.print(getHelpMessage(this.voiceAvailable));

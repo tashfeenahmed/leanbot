@@ -3,7 +3,6 @@ import * as path from 'path';
 import type { Logger } from 'pino';
 import type {
   LLMProvider,
-  Message,
   ContentBlock,
   ToolUseContent,
   TokenUsage,

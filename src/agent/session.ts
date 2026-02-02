@@ -253,7 +253,7 @@ export class SessionManager {
 
       let session: Session | undefined;
       const messages: Message[] = [];
-      let tokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+      const tokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
       let metadata: SessionMetadata = {};
 
       for (const line of lines) {

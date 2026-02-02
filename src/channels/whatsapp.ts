@@ -10,8 +10,6 @@
  * Note: Requires optional dependency @whiskeysockets/baileys
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import { join } from 'path';
 import { mkdir } from 'fs/promises';
 import type { Logger } from 'pino';
@@ -256,7 +254,7 @@ export class WhatsAppChannel implements Channel, VoiceChannel {
   }
 
   private async handleCommand(text: string, jid: string): Promise<void> {
-    const [command, ...args] = text.slice(1).split(' ');
+    const [command, ..._args] = text.slice(1).split(' ');
 
     switch (command.toLowerCase()) {
       case 'start':
