@@ -14,11 +14,13 @@ vi.mock('../channels/telegram.js', () => ({
 // Helper to create complete mock config
 const createMockConfig = (testDir: string, overrides: Record<string, unknown> = {}) => ({
   providers: {
-    anthropic: { apiKey: 'test-key', model: 'claude-sonnet-4-20250514' },
+    anthropic: { apiKey: 'test-key', model: 'claude-sonnet-4-5-20250929' },
     openai: { apiKey: '', model: 'gpt-4o' },
     groq: { apiKey: '', model: 'llama-3.3-70b-versatile' },
     ollama: { baseUrl: 'http://localhost:11434', model: 'llama3' },
     openrouter: { apiKey: '', model: 'anthropic/claude-3-sonnet' },
+    moonshot: { apiKey: '', model: 'kimi-k2-0905' },
+    xai: { apiKey: '', model: 'grok-4' },
     ...((overrides.providers as Record<string, unknown>) || {}),
   },
   channels: {

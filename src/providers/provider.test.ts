@@ -34,7 +34,7 @@ describe('AnthropicProvider', () => {
         apiKey: 'sk-ant-test-key',
       });
 
-      expect(provider.model).toBe('claude-sonnet-4-20250514');
+      expect(provider.model).toBe('claude-sonnet-4-5-20250929');
     });
 
     it('should use custom model if specified', async () => {
@@ -75,7 +75,7 @@ describe('AnthropicProvider', () => {
         content: [{ type: 'text', text: 'Hello, world!' }],
         stop_reason: 'end_turn',
         usage: { input_tokens: 10, output_tokens: 5 },
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5-20250929',
       });
 
       vi.mocked(Anthropic).mockImplementation(() => ({
@@ -96,7 +96,7 @@ describe('AnthropicProvider', () => {
       const response = await provider.complete(request);
 
       expect(mockCreate).toHaveBeenCalledWith({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5-20250929',
         messages: [{ role: 'user', content: 'Hello' }],
         system: 'You are a helpful assistant',
         max_tokens: 1024,
@@ -114,7 +114,7 @@ describe('AnthropicProvider', () => {
         content: [{ type: 'tool_use', id: 'tool-1', name: 'read_file', input: { path: '/test.txt' } }],
         stop_reason: 'tool_use',
         usage: { input_tokens: 20, output_tokens: 15 },
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5-20250929',
       });
 
       vi.mocked(Anthropic).mockImplementation(() => ({
@@ -167,7 +167,7 @@ describe('AnthropicProvider', () => {
         content: [{ type: 'text', text: 'Response' }],
         stop_reason: 'end_turn',
         usage: { input_tokens: 10, output_tokens: 5 },
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5-20250929',
       });
 
       vi.mocked(Anthropic).mockImplementation(() => ({
@@ -184,7 +184,7 @@ describe('AnthropicProvider', () => {
       });
 
       expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
-        max_tokens: 4096,
+        max_tokens: 8192,
       }));
     });
   });

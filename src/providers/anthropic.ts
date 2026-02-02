@@ -8,8 +8,37 @@ import type {
   StreamEvent,
 } from './types.js';
 
-const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
-const DEFAULT_MAX_TOKENS = 4096;
+/**
+ * Claude Model IDs (as of 2025)
+ *
+ * Claude 4.5 Family (Latest):
+ * - claude-opus-4-5-20251101: Most capable, best for complex tasks
+ * - claude-sonnet-4-5-20250929: Balanced performance/cost, 1M context (preview)
+ *
+ * Claude 4 Family:
+ * - claude-opus-4-1-20250801: Industry leader for coding and agents
+ * - claude-sonnet-4-20250514: Standard balanced model
+ *
+ * Aliases (auto-migrate to latest):
+ * - claude-opus-4-5-latest
+ * - claude-sonnet-4-5-latest
+ * - claude-opus-4-latest
+ * - claude-sonnet-4-latest
+ */
+export const ANTHROPIC_MODELS = {
+  // Claude 4.5 (Latest)
+  'claude-opus-4-5': 'claude-opus-4-5-20251101',
+  'claude-sonnet-4-5': 'claude-sonnet-4-5-20250929',
+  // Claude 4
+  'claude-opus-4-1': 'claude-opus-4-1-20250801',
+  'claude-sonnet-4': 'claude-sonnet-4-20250514',
+  // Aliases
+  'opus': 'claude-opus-4-5-20251101',
+  'sonnet': 'claude-sonnet-4-5-20250929',
+} as const;
+
+const DEFAULT_MODEL = 'claude-sonnet-4-5-20250929';
+const DEFAULT_MAX_TOKENS = 8192;
 const DEFAULT_MAX_RETRIES = 3;
 const RETRY_STATUS_CODES = [429, 500, 503];
 const RETRY_DELAY_MS = 1000;

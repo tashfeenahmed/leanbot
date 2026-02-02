@@ -1,7 +1,17 @@
 import * as path from 'path';
 import type { Logger } from 'pino';
 import type { Config } from '../config/config.js';
-import { AnthropicProvider, ProviderRegistry, type LLMProvider } from '../providers/index.js';
+import {
+  AnthropicProvider,
+  OpenAIProvider,
+  GroqProvider,
+  OllamaProvider,
+  OpenRouterProvider,
+  MoonshotProvider,
+  XAIProvider,
+  ProviderRegistry,
+  type LLMProvider,
+} from '../providers/index.js';
 import { createDefaultToolRegistry, type ToolRegistry } from '../tools/index.js';
 import { SessionManager } from '../agent/session.js';
 import { Agent } from '../agent/agent.js';
@@ -162,6 +172,73 @@ export class Gateway {
       });
       this.providerRegistry.registerProvider(anthropic);
       this.logger.debug({ provider: 'anthropic', model: anthropicConfig.model }, 'Provider registered');
+    }
+
+    // Initialize OpenAI provider
+    const openaiConfig = this.config.providers.openai;
+    if (openaiConfig.apiKey) {
+      const openai = new OpenAIProvider({
+        apiKey: openaiConfig.apiKey,
+        model: openaiConfig.model,
+      });
+      this.providerRegistry.registerProvider(openai);
+      this.logger.debug({ provider: 'openai', model: openaiConfig.model }, 'Provider registered');
+    }
+
+    // Initialize Groq provider
+    const groqConfig = this.config.providers.groq;
+    if (groqConfig.apiKey) {
+      const groq = new GroqProvider({
+        apiKey: groqConfig.apiKey,
+        model: groqConfig.model,
+      });
+      this.providerRegistry.registerProvider(groq);
+      this.logger.debug({ provider: 'groq', model: groqConfig.model }, 'Provider registered');
+    }
+
+    // Initialize Ollama provider (no API key needed, just check if configured)
+    const ollamaConfig = this.config.providers.ollama;
+    if (ollamaConfig.baseUrl) {
+      const ollama = new OllamaProvider({
+        apiKey: '', // Ollama doesn't require an API key
+        baseUrl: ollamaConfig.baseUrl,
+        model: ollamaConfig.model,
+      });
+      this.providerRegistry.registerProvider(ollama);
+      this.logger.debug({ provider: 'ollama', model: ollamaConfig.model }, 'Provider registered');
+    }
+
+    // Initialize OpenRouter provider
+    const openrouterConfig = this.config.providers.openrouter;
+    if (openrouterConfig.apiKey) {
+      const openrouter = new OpenRouterProvider({
+        apiKey: openrouterConfig.apiKey,
+        model: openrouterConfig.model,
+      });
+      this.providerRegistry.registerProvider(openrouter);
+      this.logger.debug({ provider: 'openrouter', model: openrouterConfig.model }, 'Provider registered');
+    }
+
+    // Initialize Moonshot (Kimi) provider
+    const moonshotConfig = this.config.providers.moonshot;
+    if (moonshotConfig.apiKey) {
+      const moonshot = new MoonshotProvider({
+        apiKey: moonshotConfig.apiKey,
+        model: moonshotConfig.model,
+      });
+      this.providerRegistry.registerProvider(moonshot);
+      this.logger.debug({ provider: 'moonshot', model: moonshotConfig.model }, 'Provider registered');
+    }
+
+    // Initialize xAI (Grok) provider
+    const xaiConfig = this.config.providers.xai;
+    if (xaiConfig.apiKey) {
+      const xai = new XAIProvider({
+        apiKey: xaiConfig.apiKey,
+        model: xaiConfig.model,
+      });
+      this.providerRegistry.registerProvider(xai);
+      this.logger.debug({ provider: 'xai', model: xaiConfig.model }, 'Provider registered');
     }
   }
 
