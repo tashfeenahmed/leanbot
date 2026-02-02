@@ -178,8 +178,8 @@ export class TelegramChannel {
       await this.handleStart(ctx, userId);
     });
 
-    // /reset command
-    this.bot.command('reset', async (ctx) => {
+    // /new command - start a new chat
+    this.bot.command('new', async (ctx) => {
       const userId = ctx.from?.id.toString();
       if (!userId) return;
 
@@ -189,7 +189,7 @@ export class TelegramChannel {
       }
 
       await this.handleReset(userId);
-      await ctx.reply('Conversation history cleared. Starting fresh!');
+      await ctx.reply('Starting a new conversation!');
     });
 
     // /settings command
@@ -293,7 +293,7 @@ export class TelegramChannel {
         '/help - Show all commands\n' +
         '/settings - View your settings\n' +
         '/setup - Reconfigure me\n' +
-        '/reset - Clear conversation',
+        '/new - Start new conversation',
         { parse_mode: 'HTML' }
       );
     } else {
@@ -349,7 +349,7 @@ export class TelegramChannel {
       '/help - Show this help\n' +
       '/settings - View your configuration\n' +
       '/setup - Reconfigure the bot\n' +
-      '/reset - Clear conversation history\n\n' +
+      '/new - Start new conversation history\n\n' +
       '<b>What I can do:</b>\n' +
       '- Read and write files on the server\n' +
       '- Execute shell commands\n' +
@@ -688,7 +688,7 @@ export class TelegramChannel {
       { command: 'help', description: 'Show available commands' },
       { command: 'settings', description: 'View your current settings' },
       { command: 'setup', description: 'Reconfigure bot (name, personality, model)' },
-      { command: 'reset', description: 'Clear conversation history' },
+      { command: 'new', description: 'Start a new conversation' },
     ]);
 
     await this.bot.start({
@@ -736,5 +736,5 @@ Commands:
 /help - All commands
 /settings - Your configuration
 /setup - Reconfigure me
-/reset - Clear conversation history`;
+/new - Start new conversation history`;
 }

@@ -37,11 +37,11 @@ export class Router {
   private unhealthyThreshold: number;
 
   constructor(options: RouterOptions) {
-    this.providerOrder = options.providerOrder || ['anthropic', 'openai', 'groq', 'ollama'];
+    this.providerOrder = options.providerOrder || ['moonshot', 'anthropic', 'openai', 'groq', 'xai', 'ollama'];
     this.tierMapping = options.tierMapping || {
-      fast: ['groq', 'ollama', 'openai'],
-      standard: ['openai', 'anthropic'],
-      capable: ['anthropic', 'openai'],
+      fast: ['groq', 'moonshot', 'ollama', 'openai'],
+      standard: ['moonshot', 'openai', 'anthropic', 'xai'],
+      capable: ['anthropic', 'moonshot', 'openai', 'xai'],
     };
     this.unhealthyThreshold = options.unhealthyThreshold || 3;
   }

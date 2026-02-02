@@ -227,7 +227,7 @@ export function loadConfig(): Config {
     routing: {
       providerOrder: process.env.PROVIDER_ORDER
         ? process.env.PROVIDER_ORDER.split(',').map((p) => p.trim())
-        : ['anthropic', 'openai', 'groq', 'ollama'],
+        : ['moonshot', 'anthropic', 'openai', 'groq', 'xai', 'ollama'],
       enableComplexityAnalysis: process.env.ENABLE_COMPLEXITY_ANALYSIS !== 'false',
     },
     cost: {
