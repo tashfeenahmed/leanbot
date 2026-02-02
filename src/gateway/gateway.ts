@@ -200,7 +200,6 @@ export class Gateway {
     const ollamaConfig = this.config.providers.ollama;
     if (ollamaConfig.baseUrl) {
       const ollama = new OllamaProvider({
-        apiKey: '', // Ollama doesn't require an API key
         baseUrl: ollamaConfig.baseUrl,
         model: ollamaConfig.model,
       });

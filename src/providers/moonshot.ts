@@ -4,12 +4,12 @@
  * Moonshot AI provides the Kimi model family with OpenAI-compatible API.
  * https://platform.moonshot.ai/
  *
- * Models (as of 2025):
- * - kimi-k2-0905: Latest MoE model, 1T params, 256K context, best for agents
- * - kimi-k2-thinking: Reasoning model for complex tasks
- * - moonshot-v1-128k: Earlier model with 128K context
- * - moonshot-v1-32k: Faster model with 32K context
- * - moonshot-v1-8k: Fastest model with 8K context
+ * Models (as of 2026):
+ * - kimi-k2.5: Latest multimodal agentic model, 1T params, agent swarm capable
+ * - kimi-k2.5-thinking: Reasoning variant with extended thinking
+ * - kimi-k2-0905: Previous MoE model, 256K context, good for agents
+ * - kimi-k2-thinking: K2 reasoning model for complex tasks
+ * - moonshot-v1-128k/32k/8k: Legacy models with varying context
  */
 
 import OpenAI from 'openai';
@@ -25,7 +25,10 @@ import type {
  * Moonshot/Kimi Model IDs
  */
 export const MOONSHOT_MODELS = {
-  // Kimi K2 (Latest)
+  // Kimi K2.5 (Latest - multimodal agentic)
+  'kimi-k2.5': 'kimi-k2.5',
+  'kimi-k2.5-thinking': 'kimi-k2.5-thinking',
+  // Kimi K2
   'kimi-k2': 'kimi-k2-0905',
   'kimi-k2-thinking': 'kimi-k2-thinking',
   // Legacy Moonshot models
@@ -33,10 +36,10 @@ export const MOONSHOT_MODELS = {
   'moonshot-v1-32k': 'moonshot-v1-32k',
   'moonshot-v1-8k': 'moonshot-v1-8k',
   // Aliases
-  'kimi': 'kimi-k2-0905',
+  'kimi': 'kimi-k2.5',
 } as const;
 
-const DEFAULT_MODEL = 'kimi-k2-0905';
+const DEFAULT_MODEL = 'kimi-k2.5';
 const DEFAULT_BASE_URL = 'https://api.moonshot.cn/v1';
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_MAX_RETRIES = 3;

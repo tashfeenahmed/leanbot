@@ -25,7 +25,7 @@ describe('MoonshotProvider', () => {
   describe('constructor', () => {
     it('should create provider with default model', () => {
       expect(provider.name).toBe('moonshot');
-      expect(provider.model).toBe('kimi-k2-0905');
+      expect(provider.model).toBe('kimi-k2.5');
     });
 
     it('should create provider with custom model', () => {
@@ -65,7 +65,7 @@ describe('MoonshotProvider', () => {
           prompt_tokens: 10,
           completion_tokens: 5,
         },
-        model: 'kimi-k2-0905',
+        model: 'kimi-k2.5',
       });
 
       const mockInstance = new OpenAI({ apiKey: 'test' });
@@ -88,7 +88,7 @@ describe('MoonshotProvider', () => {
       const mockCreate = vi.fn().mockResolvedValue({
         choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }],
         usage: { prompt_tokens: 10, completion_tokens: 5 },
-        model: 'kimi-k2-0905',
+        model: 'kimi-k2.5',
       });
 
       const mockInstance = new OpenAI({ apiKey: 'test' });
@@ -131,7 +131,7 @@ describe('MoonshotProvider', () => {
           },
         ],
         usage: { prompt_tokens: 20, completion_tokens: 10 },
-        model: 'kimi-k2-0905',
+        model: 'kimi-k2.5',
       });
 
       const mockInstance = new OpenAI({ apiKey: 'test' });
