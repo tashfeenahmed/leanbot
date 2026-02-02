@@ -40,7 +40,7 @@ export const MOONSHOT_MODELS = {
 } as const;
 
 const DEFAULT_MODEL = 'kimi-k2.5';
-const DEFAULT_BASE_URL = 'https://api.moonshot.cn/v1';
+const DEFAULT_BASE_URL = 'https://api.moonshot.ai/v1';
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_MAX_RETRIES = 3;
 const RETRY_STATUS_CODES = [429, 500, 503];
