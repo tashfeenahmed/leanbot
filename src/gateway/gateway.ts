@@ -367,18 +367,59 @@ export class Gateway {
   }
 
   /**
-   * Handle a triggered reminder by sending a message to the user
+   * Handle a triggered reminder by executing it through the agent
+   * If the reminder contains an action (like "check the weather"), the agent will perform it
    */
   private async handleReminderTrigger(reminder: Reminder): Promise<void> {
     this.logger.info({ reminderId: reminder.id, userId: reminder.userId, message: reminder.message }, 'Reminder triggered');
 
-    // Send via Telegram channel
-    if (this.telegramChannel) {
-      const reminderMessage = `**Reminder!**\n\n${reminder.message}`;
-      await this.telegramChannel.sendMessage(reminder.userId, reminderMessage);
-      this.logger.debug({ reminderId: reminder.id }, 'Reminder sent via Telegram');
-    } else {
+    if (!this.telegramChannel) {
       this.logger.warn({ reminderId: reminder.id }, 'No channel available to send reminder');
+      return;
+    }
+
+    // Check if this is an actionable reminder (contains action words)
+    const actionKeywords = ['check', 'get', 'find', 'search', 'look up', 'tell me', 'show', 'fetch', 'run', 'execute', 'do'];
+    const isActionable = actionKeywords.some(keyword =>
+      reminder.message.toLowerCase().includes(keyword)
+    );
+
+    if (isActionable && this.agent) {
+      // Run the reminder message through the agent to execute the action
+      this.logger.info({ reminderId: reminder.id }, 'Executing actionable reminder through agent');
+
+      try {
+        // Send a "working on it" message first
+        await this.telegramChannel.sendMessage(reminder.userId, `**Reminder triggered!** Working on: ${reminder.message}`);
+
+        // Process through agent using the existing session
+        const result = await this.agent.processMessage(
+          reminder.sessionId,
+          `[SCHEDULED REMINDER - Execute this task now]: ${reminder.message}`,
+          undefined,
+          async (update) => {
+            // Send progress updates to user
+            if (update.type === 'thinking' && update.message) {
+              await this.telegramChannel!.sendMessage(reminder.userId, update.message);
+            }
+          }
+        );
+
+        // Send the agent's response
+        if (result.response) {
+          await this.telegramChannel.sendMessage(reminder.userId, result.response);
+        }
+
+        this.logger.debug({ reminderId: reminder.id }, 'Actionable reminder executed');
+      } catch (error) {
+        this.logger.error({ reminderId: reminder.id, error: (error as Error).message }, 'Failed to execute actionable reminder');
+        // Fallback to simple reminder
+        await this.telegramChannel.sendMessage(reminder.userId, `**Reminder!**\n\n${reminder.message}`);
+      }
+    } else {
+      // Simple reminder - just send the message
+      await this.telegramChannel.sendMessage(reminder.userId, `**Reminder!**\n\n${reminder.message}`);
+      this.logger.debug({ reminderId: reminder.id }, 'Simple reminder sent');
     }
   }
 }

@@ -73,8 +73,12 @@ Available tools:
 REMINDERS - IMPORTANT:
 When the user asks to be reminded about something, use the reminder tool with action="set".
 - This tool returns IMMEDIATELY after scheduling the reminder
-- The reminder will trigger a message to the user when the time comes
-- Examples: "remind me in 5 min", "set a reminder for 1 hour", "alert me in 30 minutes about the meeting"
+- When the reminder triggers:
+  - If it contains an ACTION (check, get, search, find, etc.), the action will be EXECUTED automatically
+  - If it's a simple reminder (like "smile"), just the message is sent
+- Examples:
+  - "remind me in 5 min to check the weather" → Will CHECK the weather when it triggers
+  - "alert me in 30 minutes about the meeting" → Will just send a reminder message
 - DO NOT use bash sleep or any blocking approach - always use the reminder tool
 
 AUTOMATIC MEMORY - IMPORTANT:
