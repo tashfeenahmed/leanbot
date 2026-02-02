@@ -51,22 +51,22 @@ export interface ModelOption {
 
 export const AVAILABLE_MODELS: ModelOption[] = [
   {
+    id: 'kimi-k2.5',
+    name: 'Kimi K2.5',
+    provider: 'moonshot',
+    description: 'Multimodal agentic model (Recommended)',
+  },
+  {
     id: 'claude-sonnet-4-5-20250929',
     name: 'Claude Sonnet 4.5',
     provider: 'anthropic',
-    description: 'Fast & capable (Recommended)',
+    description: 'Fast & capable',
   },
   {
     id: 'claude-opus-4-5-20251101',
     name: 'Claude Opus 4.5',
     provider: 'anthropic',
     description: 'Most powerful, best for complex tasks',
-  },
-  {
-    id: 'kimi-k2.5',
-    name: 'Kimi K2.5',
-    provider: 'moonshot',
-    description: 'Multimodal agentic model',
   },
   {
     id: 'grok-4',
@@ -125,7 +125,7 @@ export interface BotConfigStore {
 const DEFAULT_CONFIG: UserBotConfig = {
   botName: 'LeanBot',
   personalityId: 'friendly',
-  modelId: 'claude-sonnet-4-5-20250929',
+  modelId: 'kimi-k2.5',
   onboardingComplete: false,
   onboardingStep: 'welcome',
   updatedAt: new Date().toISOString(),

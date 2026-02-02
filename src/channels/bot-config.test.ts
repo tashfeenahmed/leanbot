@@ -67,7 +67,7 @@ describe('BotConfigManager', () => {
 
       expect(config.botName).toBe('LeanBot');
       expect(config.personalityId).toBe('friendly');
-      expect(config.modelId).toBe('claude-sonnet-4-5-20250929');
+      expect(config.modelId).toBe('kimi-k2.5');
       expect(config.onboardingComplete).toBe(false);
       expect(config.onboardingStep).toBe('welcome');
     });
@@ -303,8 +303,8 @@ describe('AVAILABLE_MODELS', () => {
     }
   });
 
-  it('should include Claude Sonnet as the first (recommended) model', () => {
-    expect(AVAILABLE_MODELS[0].name).toContain('Claude');
-    expect(AVAILABLE_MODELS[0].name).toContain('Sonnet');
+  it('should include Kimi K2.5 as the first (recommended) model', () => {
+    expect(AVAILABLE_MODELS[0].name).toContain('Kimi');
+    expect(AVAILABLE_MODELS[0].id).toBe('kimi-k2.5');
   });
 });
