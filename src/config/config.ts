@@ -54,6 +54,10 @@ const providersSchema = z.object({
 const telegramChannelSchema = z.object({
   enabled: z.boolean().default(false),
   botToken: z.string().default(''),
+  /** Comma-separated list of allowed Telegram user IDs. Empty = allow all */
+  allowedUsers: z.array(z.string()).default([]),
+  /** Enable voice reply when receiving voice messages */
+  enableVoiceReply: z.boolean().default(false),
 });
 
 const discordChannelSchema = z.object({
@@ -202,6 +206,10 @@ export function loadConfig(): Config {
       telegram: {
         enabled: !!telegramBotToken,
         botToken: telegramBotToken || '',
+        allowedUsers: process.env.TELEGRAM_ALLOWED_USERS
+          ? process.env.TELEGRAM_ALLOWED_USERS.split(',').map((id) => id.trim()).filter(Boolean)
+          : [],
+        enableVoiceReply: process.env.TELEGRAM_VOICE_REPLY === 'true',
       },
       discord: {
         enabled: !!discordBotToken,

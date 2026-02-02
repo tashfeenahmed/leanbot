@@ -274,6 +274,9 @@ export class Gateway {
         agent: this.agent!,
         sessionManager: this.sessionManager!,
         logger: this.logger,
+        workspacePath: this.config.agent.workspace,
+        allowedUsers: this.config.channels.telegram.allowedUsers,
+        enableVoiceReply: this.config.channels.telegram.enableVoiceReply,
       });
       await this.telegramChannel.start();
     }

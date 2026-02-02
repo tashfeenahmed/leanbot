@@ -3,6 +3,13 @@ import type { Logger } from 'pino';
 import type { Agent } from '../agent/agent.js';
 import type { SessionManager } from '../agent/session.js';
 import { VoiceManager } from '../voice/index.js';
+import {
+  BotConfigManager,
+  DEFAULT_PERSONALITIES,
+  AVAILABLE_MODELS,
+  type OnboardingStep,
+  type UserBotConfig,
+} from './bot-config.js';
 
 const MAX_MESSAGE_LENGTH = 4096;
 const TYPING_INTERVAL = 5000; // 5 seconds
@@ -13,22 +20,9 @@ export interface TelegramChannelOptions {
   agent: Agent;
   sessionManager: SessionManager;
   logger: Logger;
-  enableVoiceReply?: boolean; // Reply with voice when receiving voice messages
-}
-
-export function getStartMessage(): string {
-  return `Welcome to LeanBot! 🤖
-
-I'm your personal AI assistant. I can help you with:
-• Reading and writing files
-• Executing commands
-• General questions and tasks
-
-Just send me a message and I'll do my best to help!
-
-Commands:
-• /start - Show this message
-• /reset - Clear conversation history`;
+  workspacePath: string;
+  allowedUsers?: string[]; // Empty = allow all
+  enableVoiceReply?: boolean;
 }
 
 export function formatMarkdownToHtml(text: string): string {
@@ -100,6 +94,8 @@ export class TelegramChannel {
   private agent: Agent;
   private sessionManager: SessionManager;
   private logger: Logger;
+  private configManager: BotConfigManager;
+  private allowedUsers: Set<string>;
   public userSessions: Map<string, string> = new Map();
   private isRunning = false;
   private voiceManager: VoiceManager | null = null;
@@ -111,6 +107,8 @@ export class TelegramChannel {
     this.agent = options.agent;
     this.sessionManager = options.sessionManager;
     this.logger = options.logger.child({ channel: 'telegram' });
+    this.configManager = new BotConfigManager(options.workspacePath);
+    this.allowedUsers = new Set(options.allowedUsers || []);
     this.enableVoiceReply = options.enableVoiceReply ?? false;
 
     this.setupHandlers();
@@ -123,7 +121,6 @@ export class TelegramChannel {
       const status = await this.voiceManager.isAvailable();
       this.voiceAvailable = status.stt;
 
-      // Check TTS availability for voice replies
       if (this.enableVoiceReply && !status.tts) {
         this.logger.warn('TTS not available - voice replies will be disabled');
         this.enableVoiceReply = false;
@@ -142,10 +139,43 @@ export class TelegramChannel {
     }
   }
 
+  /**
+   * Check if a user is allowed to use the bot
+   */
+  private isUserAllowed(userId: string): boolean {
+    // If no whitelist configured, allow everyone
+    if (this.allowedUsers.size === 0) {
+      return true;
+    }
+    return this.allowedUsers.has(userId);
+  }
+
+  /**
+   * Send unauthorized message
+   */
+  private async sendUnauthorized(ctx: Context): Promise<void> {
+    const userId = ctx.from?.id.toString() || 'unknown';
+    this.logger.warn({ userId }, 'Unauthorized access attempt');
+    await ctx.reply(
+      'Sorry, you are not authorized to use this bot.\n\n' +
+      `Your user ID is: <code>${userId}</code>\n\n` +
+      'Please contact the administrator to request access.',
+      { parse_mode: 'HTML' }
+    );
+  }
+
   private setupHandlers(): void {
-    // /start command
+    // /start command - triggers onboarding or shows welcome
     this.bot.command('start', async (ctx) => {
-      await ctx.reply(getStartMessage());
+      const userId = ctx.from?.id.toString();
+      if (!userId) return;
+
+      if (!this.isUserAllowed(userId)) {
+        await this.sendUnauthorized(ctx);
+        return;
+      }
+
+      await this.handleStart(ctx, userId);
     });
 
     // /reset command
@@ -153,22 +183,91 @@ export class TelegramChannel {
       const userId = ctx.from?.id.toString();
       if (!userId) return;
 
+      if (!this.isUserAllowed(userId)) {
+        await this.sendUnauthorized(ctx);
+        return;
+      }
+
       await this.handleReset(userId);
       await ctx.reply('Conversation history cleared. Starting fresh!');
     });
 
+    // /settings command
+    this.bot.command('settings', async (ctx) => {
+      const userId = ctx.from?.id.toString();
+      if (!userId) return;
+
+      if (!this.isUserAllowed(userId)) {
+        await this.sendUnauthorized(ctx);
+        return;
+      }
+
+      await this.handleSettings(ctx, userId);
+    });
+
+    // /help command
+    this.bot.command('help', async (ctx) => {
+      const userId = ctx.from?.id.toString();
+      if (!userId) return;
+
+      if (!this.isUserAllowed(userId)) {
+        await this.sendUnauthorized(ctx);
+        return;
+      }
+
+      await this.handleHelp(ctx, userId);
+    });
+
+    // /setup command - restart onboarding
+    this.bot.command('setup', async (ctx) => {
+      const userId = ctx.from?.id.toString();
+      if (!userId) return;
+
+      if (!this.isUserAllowed(userId)) {
+        await this.sendUnauthorized(ctx);
+        return;
+      }
+
+      await this.configManager.resetUserConfig(userId);
+      await this.handleStart(ctx, userId);
+    });
+
     // Handle regular messages
     this.bot.on('message:text', async (ctx) => {
+      const userId = ctx.from?.id.toString();
+      if (!userId) return;
+
+      if (!this.isUserAllowed(userId)) {
+        await this.sendUnauthorized(ctx);
+        return;
+      }
+
       await this.handleMessage(ctx);
     });
 
     // Handle voice messages
     this.bot.on('message:voice', async (ctx) => {
+      const userId = ctx.from?.id.toString();
+      if (!userId) return;
+
+      if (!this.isUserAllowed(userId)) {
+        await this.sendUnauthorized(ctx);
+        return;
+      }
+
       await this.handleVoiceMessage(ctx);
     });
 
-    // Handle audio messages (voice notes sent as audio files)
+    // Handle audio messages
     this.bot.on('message:audio', async (ctx) => {
+      const userId = ctx.from?.id.toString();
+      if (!userId) return;
+
+      if (!this.isUserAllowed(userId)) {
+        await this.sendUnauthorized(ctx);
+        return;
+      }
+
       await this.handleVoiceMessage(ctx);
     });
 
@@ -176,6 +275,242 @@ export class TelegramChannel {
     this.bot.catch((err) => {
       this.logger.error({ error: err.message }, 'Bot error');
     });
+  }
+
+  /**
+   * Handle /start command - show onboarding or welcome
+   */
+  private async handleStart(ctx: Context, userId: string): Promise<void> {
+    const config = this.configManager.getUserConfig(userId);
+
+    if (config.onboardingComplete) {
+      // Already onboarded, show welcome
+      const botName = config.botName;
+      await ctx.reply(
+        `Welcome back! I'm <b>${botName}</b>, your personal AI assistant.\n\n` +
+        'How can I help you today?\n\n' +
+        'Commands:\n' +
+        '/help - Show all commands\n' +
+        '/settings - View your settings\n' +
+        '/setup - Reconfigure me\n' +
+        '/reset - Clear conversation',
+        { parse_mode: 'HTML' }
+      );
+    } else {
+      // Start onboarding
+      await this.startOnboarding(ctx, userId);
+    }
+  }
+
+  /**
+   * Start the onboarding wizard
+   */
+  private async startOnboarding(ctx: Context, userId: string): Promise<void> {
+    await this.configManager.updateUserConfig(userId, {
+      onboardingStep: 'name',
+      onboardingComplete: false,
+    });
+
+    await ctx.reply(
+      "Welcome! Let's get you set up.\n\n" +
+      "First, what would you like to call me? (e.g., Jarvis, Friday, Max, or any name you like)"
+    );
+  }
+
+  /**
+   * Handle /settings command
+   */
+  private async handleSettings(ctx: Context, userId: string): Promise<void> {
+    const config = this.configManager.getUserConfig(userId);
+    const personality = this.configManager.getPersonality(config.personalityId);
+    const model = this.configManager.getModel(config.modelId);
+
+    await ctx.reply(
+      '<b>Your Settings</b>\n\n' +
+      `<b>Bot Name:</b> ${config.botName}\n` +
+      `<b>Personality:</b> ${personality?.name || config.personalityId}\n` +
+      `<b>Model:</b> ${model?.name || config.modelId}\n\n` +
+      'Use /setup to reconfigure these settings.',
+      { parse_mode: 'HTML' }
+    );
+  }
+
+  /**
+   * Handle /help command
+   */
+  private async handleHelp(ctx: Context, userId: string): Promise<void> {
+    const config = this.configManager.getUserConfig(userId);
+    const botName = config.botName;
+
+    await ctx.reply(
+      `<b>${botName} - Help</b>\n\n` +
+      '<b>Commands:</b>\n' +
+      '/start - Welcome message\n' +
+      '/help - Show this help\n' +
+      '/settings - View your configuration\n' +
+      '/setup - Reconfigure the bot\n' +
+      '/reset - Clear conversation history\n\n' +
+      '<b>What I can do:</b>\n' +
+      '- Read and write files on the server\n' +
+      '- Execute shell commands\n' +
+      '- Answer questions and help with tasks\n' +
+      '- Process voice messages (if enabled)\n' +
+      '- Remember our conversation context\n\n' +
+      'Just send me a message and I\'ll do my best to help!',
+      { parse_mode: 'HTML' }
+    );
+  }
+
+  /**
+   * Handle onboarding flow responses
+   */
+  private async handleOnboardingResponse(ctx: Context, userId: string, message: string): Promise<boolean> {
+    const config = this.configManager.getUserConfig(userId);
+
+    if (config.onboardingComplete) {
+      return false; // Not in onboarding
+    }
+
+    const step = config.onboardingStep || 'welcome';
+
+    switch (step) {
+      case 'name':
+        return await this.handleNameStep(ctx, userId, message);
+
+      case 'personality':
+        return await this.handlePersonalityStep(ctx, userId, message);
+
+      case 'custom_personality':
+        return await this.handleCustomPersonalityStep(ctx, userId, message);
+
+      case 'model':
+        return await this.handleModelStep(ctx, userId, message);
+
+      default:
+        return false;
+    }
+  }
+
+  private async handleNameStep(ctx: Context, userId: string, message: string): Promise<boolean> {
+    const botName = message.trim().substring(0, 50); // Limit name length
+
+    if (!botName) {
+      await ctx.reply("Please enter a name for me (e.g., Jarvis, Friday, Max)");
+      return true;
+    }
+
+    await this.configManager.updateUserConfig(userId, {
+      botName,
+      onboardingStep: 'personality',
+    });
+
+    // Show personality options
+    let personalityList = `Great! I'm now <b>${botName}</b>.\n\n`;
+    personalityList += "What personality should I have?\n\n";
+
+    DEFAULT_PERSONALITIES.forEach((p, idx) => {
+      personalityList += `<b>${idx + 1}.</b> ${p.name}\n   <i>${p.description}</i>\n\n`;
+    });
+
+    personalityList += `<b>${DEFAULT_PERSONALITIES.length + 1}.</b> Custom\n   <i>Describe your own personality</i>\n\n`;
+    personalityList += "Reply with a number (1-5):";
+
+    await ctx.reply(personalityList, { parse_mode: 'HTML' });
+    return true;
+  }
+
+  private async handlePersonalityStep(ctx: Context, userId: string, message: string): Promise<boolean> {
+    const choice = parseInt(message.trim(), 10);
+
+    if (isNaN(choice) || choice < 1 || choice > DEFAULT_PERSONALITIES.length + 1) {
+      await ctx.reply(`Please enter a number between 1 and ${DEFAULT_PERSONALITIES.length + 1}`);
+      return true;
+    }
+
+    if (choice === DEFAULT_PERSONALITIES.length + 1) {
+      // Custom personality
+      await this.configManager.updateUserConfig(userId, {
+        onboardingStep: 'custom_personality',
+      });
+      await ctx.reply(
+        "Describe the personality you'd like me to have.\n\n" +
+        "For example: \"Be a witty assistant who uses humor. Explain things simply and be encouraging.\""
+      );
+      return true;
+    }
+
+    const personality = DEFAULT_PERSONALITIES[choice - 1];
+    await this.configManager.updateUserConfig(userId, {
+      personalityId: personality.id,
+      onboardingStep: 'model',
+    });
+
+    await this.showModelSelection(ctx, userId, personality.name);
+    return true;
+  }
+
+  private async handleCustomPersonalityStep(ctx: Context, userId: string, message: string): Promise<boolean> {
+    const customPrompt = message.trim();
+
+    if (customPrompt.length < 10) {
+      await ctx.reply("Please provide a more detailed description (at least 10 characters)");
+      return true;
+    }
+
+    await this.configManager.updateUserConfig(userId, {
+      personalityId: 'custom',
+      customPersonality: customPrompt,
+      onboardingStep: 'model',
+    });
+
+    await this.showModelSelection(ctx, userId, 'Custom');
+    return true;
+  }
+
+  private async showModelSelection(ctx: Context, userId: string, personalityName: string): Promise<void> {
+    let modelList = `<b>${personalityName}</b> personality - got it!\n\n`;
+    modelList += "Which AI model should I use?\n\n";
+
+    AVAILABLE_MODELS.forEach((m, idx) => {
+      const recommended = idx === 0 ? ' (Recommended)' : '';
+      modelList += `<b>${idx + 1}.</b> ${m.name}${recommended}\n   <i>${m.description}</i>\n\n`;
+    });
+
+    modelList += `Reply with a number (1-${AVAILABLE_MODELS.length}):`;
+
+    await ctx.reply(modelList, { parse_mode: 'HTML' });
+  }
+
+  private async handleModelStep(ctx: Context, userId: string, message: string): Promise<boolean> {
+    const choice = parseInt(message.trim(), 10);
+
+    if (isNaN(choice) || choice < 1 || choice > AVAILABLE_MODELS.length) {
+      await ctx.reply(`Please enter a number between 1 and ${AVAILABLE_MODELS.length}`);
+      return true;
+    }
+
+    const model = AVAILABLE_MODELS[choice - 1];
+    await this.configManager.updateUserConfig(userId, {
+      modelId: model.id,
+      onboardingStep: 'complete',
+      onboardingComplete: true,
+    });
+
+    // Show completion message
+    const config = this.configManager.getUserConfig(userId);
+    const personality = this.configManager.getPersonality(config.personalityId);
+
+    await ctx.reply(
+      `<b>Setup Complete!</b>\n\n` +
+      `I'm now <b>${config.botName}</b>\n` +
+      `Personality: <b>${personality?.name || 'Custom'}</b>\n` +
+      `Model: <b>${model.name}</b>\n\n` +
+      `You can change these anytime with /setup\n\n` +
+      `How can I help you today?`,
+      { parse_mode: 'HTML' }
+    );
+
+    return true;
   }
 
   /**
@@ -192,32 +527,24 @@ export class TelegramChannel {
 
     this.logger.info({ userId }, 'Received voice message');
 
-    // Start typing/recording indicator
     const typingInterval = this.startTypingIndicator(ctx);
 
     try {
-      // Get file info
       const voice = ctx.message?.voice || ctx.message?.audio;
       if (!voice) {
         throw new Error('No voice data in message');
       }
 
-      // Download voice file
       const file = await ctx.api.getFile(voice.file_id);
       const fileUrl = `https://api.telegram.org/file/bot${this.bot.token}/${file.file_path}`;
 
-      // Fetch the audio data
       const response = await fetch(fileUrl);
       if (!response.ok) {
         throw new Error(`Failed to download voice file: ${response.status}`);
       }
 
       const audioBuffer = Buffer.from(await response.arrayBuffer());
-      this.logger.debug({ size: audioBuffer.length }, 'Downloaded voice file');
-
-      // Transcribe
       const transcription = await this.voiceManager.transcribe(audioBuffer);
-      this.logger.info({ text: transcription.text.substring(0, 50) }, 'Transcribed voice');
 
       if (!transcription.text.trim()) {
         clearInterval(typingInterval);
@@ -225,18 +552,14 @@ export class TelegramChannel {
         return;
       }
 
-      // Show what was understood
-      await ctx.reply(`🎤 "${transcription.text}"`);
+      await ctx.reply(`"${transcription.text}"`);
 
-      // Get or create session
+      // Process as regular message
       const sessionId = await this.getOrCreateSession(userId);
-
-      // Process through agent
       const result = await this.agent.processMessage(sessionId, transcription.text);
 
       clearInterval(typingInterval);
 
-      // Format and send text response
       const formattedResponse = formatMarkdownToHtml(result.response);
       const chunks = splitMessage(formattedResponse);
 
@@ -248,37 +571,21 @@ export class TelegramChannel {
         }
       }
 
-      // Optionally reply with voice
       if (this.enableVoiceReply && result.response.length <= MAX_VOICE_RESPONSE_LENGTH) {
         try {
           const voiceResult = await this.voiceManager.synthesize(result.response);
-
-          // Map TTS format to file extension (Telegram prefers ogg/opus)
           const formatExtMap: Record<string, string> = {
-            opus: 'ogg',
-            ogg: 'ogg',
-            mp3: 'mp3',
-            wav: 'wav',
-            aac: 'aac',
-            pcm: 'wav', // PCM needs container
-            aiff: 'aiff',
+            opus: 'ogg', ogg: 'ogg', mp3: 'mp3', wav: 'wav', aac: 'aac', pcm: 'wav', aiff: 'aiff',
           };
           const ext = formatExtMap[voiceResult.format.toLowerCase()] || voiceResult.format;
-
           await ctx.replyWithVoice(new InputFile(voiceResult.audio, `response.${ext}`));
         } catch (error) {
           this.logger.debug({ error: (error as Error).message }, 'Failed to send voice reply');
         }
       }
-
-      this.logger.info(
-        { userId, responseLength: result.response.length, tokens: result.tokenUsage },
-        'Processed voice message'
-      );
     } catch (error) {
       clearInterval(typingInterval);
-      const err = error as Error;
-      this.logger.error({ userId, error: err.message }, 'Failed to process voice message');
+      this.logger.error({ userId, error: (error as Error).message }, 'Failed to process voice message');
       await ctx.reply('Sorry, I had trouble processing your voice message. Please try again or send a text message.');
     }
   }
@@ -291,22 +598,22 @@ export class TelegramChannel {
       return;
     }
 
+    // Check if in onboarding flow
+    const handled = await this.handleOnboardingResponse(ctx, userId, messageText);
+    if (handled) {
+      return;
+    }
+
     this.logger.info({ userId, message: messageText.substring(0, 100) }, 'Received message');
 
-    // Start typing indicator
     const typingInterval = this.startTypingIndicator(ctx);
 
     try {
-      // Get or create session
       const sessionId = await this.getOrCreateSession(userId);
-
-      // Process message through agent
       const result = await this.agent.processMessage(sessionId, messageText);
 
-      // Stop typing indicator
       clearInterval(typingInterval);
 
-      // Format and send response
       const formattedResponse = formatMarkdownToHtml(result.response);
       const chunks = splitMessage(formattedResponse);
 
@@ -314,7 +621,6 @@ export class TelegramChannel {
         try {
           await ctx.reply(chunk, { parse_mode: 'HTML' });
         } catch (parseError) {
-          // If HTML parsing fails, send as plain text
           this.logger.warn({ error: (parseError as Error).message }, 'HTML parse failed, sending plain text');
           await ctx.reply(chunk.replace(/<[^>]*>/g, ''));
         }
@@ -333,27 +639,21 @@ export class TelegramChannel {
   }
 
   private startTypingIndicator(ctx: Context): NodeJS.Timeout {
-    // Send typing action immediately
     ctx.replyWithChatAction('typing').catch(() => {});
-
-    // Refresh every 5 seconds
     return setInterval(() => {
       ctx.replyWithChatAction('typing').catch(() => {});
     }, TYPING_INTERVAL);
   }
 
   async getOrCreateSession(userId: string): Promise<string> {
-    // Check cache
     const cached = this.userSessions.get(userId);
     if (cached) {
-      // Verify session still exists
       const session = await this.sessionManager.getSession(cached);
       if (session) {
         return cached;
       }
     }
 
-    // Create new session
     const session = await this.sessionManager.createSession({
       userId,
       channelId: 'telegram',
@@ -376,13 +676,21 @@ export class TelegramChannel {
       return;
     }
 
+    // Load bot configurations
+    await this.configManager.load();
+
     this.logger.info('Starting Telegram bot...');
     this.isRunning = true;
 
-    // Use long polling
     await this.bot.start({
       onStart: (botInfo) => {
-        this.logger.info({ username: botInfo.username }, 'Telegram bot started');
+        this.logger.info(
+          {
+            username: botInfo.username,
+            allowedUsers: this.allowedUsers.size || 'all',
+          },
+          'Telegram bot started'
+        );
       },
     });
   }
@@ -393,8 +701,31 @@ export class TelegramChannel {
     }
 
     this.logger.info('Stopping Telegram bot...');
+
+    // Save configurations
+    await this.configManager.saveNow();
+
     await this.bot.stop();
     this.isRunning = false;
     this.logger.info('Telegram bot stopped');
   }
+}
+
+// Export for backwards compatibility and testing
+export function getStartMessage(): string {
+  return `Welcome to LeanBot!
+
+I'm your personal AI assistant. I can help you with:
+- Reading and writing files
+- Executing commands
+- General questions and tasks
+
+Just send me a message and I'll do my best to help!
+
+Commands:
+/start - Show this message
+/help - All commands
+/settings - Your configuration
+/setup - Reconfigure me
+/reset - Clear conversation history`;
 }

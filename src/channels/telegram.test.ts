@@ -14,6 +14,7 @@ describe('TelegramChannel', () => {
         agent: {} as any,
         sessionManager: {} as any,
         logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), child: vi.fn().mockReturnThis() } as any,
+        workspacePath: '/tmp/test-workspace',
       });
 
       expect(channel).toBeDefined();
@@ -134,6 +135,7 @@ describe('TelegramChannel', () => {
         agent: {} as any,
         sessionManager: mockSessionManager,
         logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), child: vi.fn().mockReturnThis() } as any,
+        workspacePath: '/tmp/test-workspace',
       });
 
       const sessionId = await channel.getOrCreateSession('user123');
@@ -157,6 +159,7 @@ describe('TelegramChannel', () => {
         agent: {} as any,
         sessionManager: mockSessionManager,
         logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), child: vi.fn().mockReturnThis() } as any,
+        workspacePath: '/tmp/test-workspace',
       });
 
       // Pre-register the session
@@ -192,6 +195,7 @@ describe('TelegramChannel', () => {
         agent: {} as any,
         sessionManager: mockSessionManager,
         logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), child: vi.fn().mockReturnThis() } as any,
+        workspacePath: '/tmp/test-workspace',
       });
 
       channel.userSessions.set('user123', 'old-session');

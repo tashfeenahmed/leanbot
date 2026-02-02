@@ -24,7 +24,7 @@ const createMockConfig = (testDir: string, overrides: Record<string, unknown> = 
     ...((overrides.providers as Record<string, unknown>) || {}),
   },
   channels: {
-    telegram: { enabled: false, botToken: '' },
+    telegram: { enabled: false, botToken: '', allowedUsers: [], enableVoiceReply: false },
     discord: { enabled: false, botToken: '', applicationId: '' },
     ...((overrides.channels as Record<string, unknown>) || {}),
   },
