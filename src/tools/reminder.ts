@@ -311,8 +311,6 @@ function scheduleReminder(reminder: Reminder): void {
   const delayMs = reminder.triggerAt.getTime() - Date.now();
 
   const timer = setTimeout(async () => {
-    activeReminders.delete(reminder.id);
-
     if (reminderCallback) {
       try {
         await reminderCallback(reminder);
@@ -321,16 +319,20 @@ function scheduleReminder(reminder: Reminder): void {
       }
     }
 
-    // Reschedule if recurring
+    // Reschedule if recurring (keep same ID)
     if (reminder.recurring) {
       const nextTrigger = getNextOccurrence(reminder.recurring);
-      const newReminder: Reminder = {
-        ...reminder,
-        id: nanoid(8), // New ID for the new occurrence
-        triggerAt: nextTrigger,
-        createdAt: new Date(),
-      };
-      scheduleReminder(newReminder);
+      reminder.triggerAt = nextTrigger;
+
+      // Clear old timer and reschedule with same reminder
+      const entry = activeReminders.get(reminder.id);
+      if (entry) {
+        clearTimeout(entry.timer);
+      }
+      scheduleReminder(reminder);
+    } else {
+      // Only delete non-recurring reminders after they trigger
+      activeReminders.delete(reminder.id);
     }
   }, Math.max(0, delayMs));
 
