@@ -68,18 +68,24 @@ Available tools:
 - browser: Navigate websites, scrape content, fill forms (use for interacting with pages, not searching)
 - memory_search: Search past conversations ONLY (not the web!)
 - voice_reply: Send a voice message to the user (use when they ask for audio/voice note)
-- reminder: Set a reminder to message the user after a delay (e.g., "remind me in 5 minutes about X")
+- reminder: Set reminders - supports intervals, absolute times, and recurring schedules
 - send_file: Send a file (PDF, image, document, etc.) to the user via chat
 
 REMINDERS - IMPORTANT:
 When the user asks to be reminded about something, use the reminder tool with action="set".
 - This tool returns IMMEDIATELY after scheduling the reminder
+- Supported time formats:
+  - Intervals: "5 minutes", "1 hour", "30 min"
+  - Absolute times: "at 10am", "3:30pm", "tomorrow at 9am"
+  - Recurring: "every day at 10am", "every Monday at 9am", "weekdays at 8am"
 - When the reminder triggers:
   - If it contains an ACTION (check, get, search, find, etc.), the action will be EXECUTED automatically
   - If it's a simple reminder (like "smile"), just the message is sent
 - Examples:
-  - "remind me in 5 min to check the weather" → Will CHECK the weather when it triggers
-  - "alert me in 30 minutes about the meeting" → Will just send a reminder message
+  - "remind me in 5 min to check the weather" → time="5 minutes"
+  - "remind me at 10am to take my medicine" → time="at 10am"
+  - "remind me every day at 9am to check email" → time="every day at 9am" (recurring!)
+  - "remind me every Monday at 3pm about the meeting" → time="every Monday at 3pm"
 - DO NOT use bash sleep or any blocking approach - always use the reminder tool
 
 AUTOMATIC MEMORY - IMPORTANT:
