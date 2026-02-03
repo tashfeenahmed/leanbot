@@ -4,6 +4,7 @@ import type { MemoryStore, HybridSearch } from '../memory/index.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { VoiceManager } from '../voice/index.js';
 import type { ReminderCallback } from './reminder.js';
+import type { FileSendCallback } from './file-send.js';
 
 /**
  * Standard tool groups for common workflows
@@ -162,6 +163,10 @@ export interface ToolRegistryOptions {
   reminderCallback?: ReminderCallback;
   /** Whether to include reminder tool (default: true if reminderCallback provided) */
   includeReminderTool?: boolean;
+  /** Callback for sending files to user */
+  fileSendCallback?: FileSendCallback;
+  /** Whether to include file send tool (default: true if fileSendCallback provided) */
+  includeFileSendTool?: boolean;
 }
 
 /**
@@ -224,6 +229,14 @@ export async function createDefaultToolRegistry(
     const { ReminderTool, initializeReminders } = await import('./reminder.js');
     initializeReminders(options.reminderCallback);
     registry.registerTool(new ReminderTool());
+  }
+
+  // Add file send tool if callback is provided
+  const includeFileSend = options.includeFileSendTool ?? !!options.fileSendCallback;
+  if (includeFileSend && options.fileSendCallback) {
+    const { FileSendTool, initializeFileSend } = await import('./file-send.js');
+    initializeFileSend(options.fileSendCallback);
+    registry.registerTool(new FileSendTool());
   }
 
   // Apply initial policy if provided

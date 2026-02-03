@@ -103,6 +103,7 @@ export class TelegramChannel {
   private voiceManager: VoiceManager | null = null;
   private voiceAvailable = false;
   private enableVoiceReply: boolean;
+  private workspacePath: string;
 
   constructor(options: TelegramChannelOptions) {
     this.bot = new Bot(options.botToken);
@@ -110,6 +111,7 @@ export class TelegramChannel {
     this.sessionManager = options.sessionManager;
     this.logger = options.logger.child({ channel: 'telegram' });
     this.configManager = new BotConfigManager(options.workspacePath);
+    this.workspacePath = options.workspacePath;
     this.allowedUsers = new Set(options.allowedUsers || []);
     this.enableVoiceReply = options.enableVoiceReply ?? false;
     this.voiceManager = options.voiceManager || null;
@@ -275,6 +277,32 @@ export class TelegramChannel {
       }
 
       await this.handleVoiceMessage(ctx);
+    });
+
+    // Handle document/file messages
+    this.bot.on('message:document', async (ctx) => {
+      const userId = ctx.from?.id.toString();
+      if (!userId) return;
+
+      if (!this.isUserAllowed(userId)) {
+        await this.sendUnauthorized(ctx);
+        return;
+      }
+
+      await this.handleDocumentMessage(ctx);
+    });
+
+    // Handle photo messages
+    this.bot.on('message:photo', async (ctx) => {
+      const userId = ctx.from?.id.toString();
+      if (!userId) return;
+
+      if (!this.isUserAllowed(userId)) {
+        await this.sendUnauthorized(ctx);
+        return;
+      }
+
+      await this.handlePhotoMessage(ctx);
     });
 
     // Error handler
@@ -610,6 +638,183 @@ export class TelegramChannel {
     }
   }
 
+  /**
+   * Handle incoming document/file messages
+   */
+  private async handleDocumentMessage(ctx: Context): Promise<void> {
+    const userId = ctx.from?.id.toString();
+    if (!userId) return;
+
+    const document = ctx.message?.document;
+    if (!document) return;
+
+    this.logger.info({ userId, fileName: document.file_name, mimeType: document.mime_type }, 'Received document');
+
+    const typingInterval = this.startTypingIndicator(ctx);
+
+    try {
+      // Download the file
+      const file = await ctx.api.getFile(document.file_id);
+      const fileUrl = `https://api.telegram.org/file/bot${this.bot.token}/${file.file_path}`;
+
+      const response = await fetch(fileUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to download file: ${response.status}`);
+      }
+
+      const fileBuffer = Buffer.from(await response.arrayBuffer());
+
+      // Save to workspace
+      const { mkdir, writeFile } = await import('fs/promises');
+      const { join } = await import('path');
+
+      const receivedDir = join(this.workspacePath, 'received-files');
+      await mkdir(receivedDir, { recursive: true });
+
+      const timestamp = Date.now();
+      const safeName = (document.file_name || 'file').replace(/[^a-zA-Z0-9.-]/g, '_');
+      const savedPath = join(receivedDir, `${timestamp}_${safeName}`);
+
+      await writeFile(savedPath, fileBuffer);
+      this.logger.debug({ savedPath }, 'Document saved');
+
+      // Get caption or generate prompt
+      const caption = ctx.message?.caption || '';
+      const prompt = caption
+        ? `The user sent a file (${document.file_name || 'document'}). Caption: "${caption}"\n\nFile saved at: ${savedPath}`
+        : `The user sent a file (${document.file_name || 'document'}).\n\nFile saved at: ${savedPath}\n\nAnalyze this file and summarize what it contains.`;
+
+      // Process through agent with attachment info
+      const sessionId = await this.getOrCreateSession(userId);
+
+      // Progress callback
+      const onProgress = async (update: { type: string; message: string }) => {
+        if (update.type === 'thinking' && update.message) {
+          const formatted = formatMarkdownToHtml(update.message);
+          const chunks = splitMessage(formatted);
+          for (const chunk of chunks) {
+            try {
+              await ctx.reply(chunk, { parse_mode: 'HTML' });
+            } catch {
+              await ctx.reply(chunk.replace(/<[^>]*>/g, ''));
+            }
+          }
+        }
+      };
+
+      const result = await this.agent.processMessage(sessionId, prompt, undefined, onProgress);
+
+      clearInterval(typingInterval);
+
+      const formattedResponse = formatMarkdownToHtml(result.response);
+      const chunks = splitMessage(formattedResponse);
+
+      for (const chunk of chunks) {
+        try {
+          await ctx.reply(chunk, { parse_mode: 'HTML' });
+        } catch {
+          await ctx.reply(chunk.replace(/<[^>]*>/g, ''));
+        }
+      }
+
+      this.logger.info({ userId, fileName: document.file_name }, 'Processed document message');
+    } catch (error) {
+      clearInterval(typingInterval);
+      this.logger.error({ userId, error: (error as Error).message }, 'Failed to process document');
+      await ctx.reply('Sorry, I had trouble processing that file. Please try again.');
+    }
+  }
+
+  /**
+   * Handle incoming photo messages
+   */
+  private async handlePhotoMessage(ctx: Context): Promise<void> {
+    const userId = ctx.from?.id.toString();
+    if (!userId) return;
+
+    const photos = ctx.message?.photo;
+    if (!photos || photos.length === 0) return;
+
+    // Get the largest photo (last in array)
+    const photo = photos[photos.length - 1];
+
+    this.logger.info({ userId, width: photo.width, height: photo.height }, 'Received photo');
+
+    const typingInterval = this.startTypingIndicator(ctx);
+
+    try {
+      // Download the photo
+      const file = await ctx.api.getFile(photo.file_id);
+      const fileUrl = `https://api.telegram.org/file/bot${this.bot.token}/${file.file_path}`;
+
+      const response = await fetch(fileUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to download photo: ${response.status}`);
+      }
+
+      const photoBuffer = Buffer.from(await response.arrayBuffer());
+
+      // Save to workspace
+      const { mkdir, writeFile } = await import('fs/promises');
+      const { join } = await import('path');
+
+      const receivedDir = join(this.workspacePath, 'received-files');
+      await mkdir(receivedDir, { recursive: true });
+
+      const timestamp = Date.now();
+      const ext = file.file_path?.split('.').pop() || 'jpg';
+      const savedPath = join(receivedDir, `${timestamp}_photo.${ext}`);
+
+      await writeFile(savedPath, photoBuffer);
+      this.logger.debug({ savedPath }, 'Photo saved');
+
+      // Get caption or generate prompt
+      const caption = ctx.message?.caption || '';
+      const prompt = caption
+        ? `The user sent a photo. Caption: "${caption}"\n\nPhoto saved at: ${savedPath}`
+        : `The user sent a photo.\n\nPhoto saved at: ${savedPath}\n\nDescribe what you see in this image.`;
+
+      // Process through agent
+      const sessionId = await this.getOrCreateSession(userId);
+
+      // Progress callback
+      const onProgress = async (update: { type: string; message: string }) => {
+        if (update.type === 'thinking' && update.message) {
+          const formatted = formatMarkdownToHtml(update.message);
+          const chunks = splitMessage(formatted);
+          for (const chunk of chunks) {
+            try {
+              await ctx.reply(chunk, { parse_mode: 'HTML' });
+            } catch {
+              await ctx.reply(chunk.replace(/<[^>]*>/g, ''));
+            }
+          }
+        }
+      };
+
+      const result = await this.agent.processMessage(sessionId, prompt, undefined, onProgress);
+
+      clearInterval(typingInterval);
+
+      const formattedResponse = formatMarkdownToHtml(result.response);
+      const chunks = splitMessage(formattedResponse);
+
+      for (const chunk of chunks) {
+        try {
+          await ctx.reply(chunk, { parse_mode: 'HTML' });
+        } catch {
+          await ctx.reply(chunk.replace(/<[^>]*>/g, ''));
+        }
+      }
+
+      this.logger.info({ userId }, 'Processed photo message');
+    } catch (error) {
+      clearInterval(typingInterval);
+      this.logger.error({ userId, error: (error as Error).message }, 'Failed to process photo');
+      await ctx.reply('Sorry, I had trouble processing that photo. Please try again.');
+    }
+  }
+
   private async handleMessage(ctx: Context): Promise<void> {
     const userId = ctx.from?.id.toString();
     const messageText = ctx.message?.text;
@@ -809,6 +1014,29 @@ export class TelegramChannel {
       this.logger.debug({ chatId, length: message.length }, 'Sent proactive message');
     } catch (error) {
       this.logger.error({ chatId, error: (error as Error).message }, 'Failed to send proactive message');
+    }
+  }
+
+  /**
+   * Send a file/document to a user
+   */
+  async sendFile(chatId: string | number, filePath: string, caption?: string): Promise<boolean> {
+    if (!this.isRunning) {
+      this.logger.warn({ chatId }, 'Cannot send file - bot not running');
+      return false;
+    }
+
+    try {
+      const file = new InputFile(filePath);
+      await this.bot.api.sendDocument(chatId, file, {
+        caption: caption ? formatMarkdownToHtml(caption) : undefined,
+        parse_mode: caption ? 'HTML' : undefined,
+      });
+      this.logger.info({ chatId, filePath }, 'File sent successfully');
+      return true;
+    } catch (error) {
+      this.logger.error({ chatId, filePath, error: (error as Error).message }, 'Failed to send file');
+      return false;
     }
   }
 

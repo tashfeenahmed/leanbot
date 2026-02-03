@@ -69,6 +69,7 @@ Available tools:
 - memory_search: Search past conversations ONLY (not the web!)
 - voice_reply: Send a voice message to the user (use when they ask for audio/voice note)
 - reminder: Set a reminder to message the user after a delay (e.g., "remind me in 5 minutes about X")
+- send_file: Send a file (PDF, image, document, etc.) to the user via chat
 
 REMINDERS - IMPORTANT:
 When the user asks to be reminded about something, use the reminder tool with action="set".

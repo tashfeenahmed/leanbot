@@ -131,7 +131,7 @@ export class Gateway {
       'Voice manager initialized'
     );
 
-    // Initialize tool registry with skills, memory, voice, and reminders
+    // Initialize tool registry with skills, memory, voice, reminders, and file sending
     this.toolRegistry = await createDefaultToolRegistry({
       skillRegistry: this.skillRegistry,
       memoryStore: this.memoryStore,
@@ -139,6 +139,9 @@ export class Gateway {
       voiceManager: voiceStatus.tts ? this.voiceManager : undefined, // Only add voice tool if TTS available
       reminderCallback: async (reminder: Reminder) => {
         await this.handleReminderTrigger(reminder);
+      },
+      fileSendCallback: async (userId: string, filePath: string, caption?: string) => {
+        return this.handleFileSend(userId, filePath, caption);
       },
     });
     this.logger.debug({ tools: this.toolRegistry.getAllTools().map((t) => t.name) }, 'Tools registered');
@@ -418,6 +421,20 @@ export class Gateway {
       await this.telegramChannel.sendMessage(reminder.userId, `**Reminder!**\n\n${reminder.message}`);
       this.logger.debug({ reminderId: reminder.id }, 'Simple reminder sent');
     }
+  }
+
+  /**
+   * Handle sending a file to a user
+   */
+  private async handleFileSend(userId: string, filePath: string, caption?: string): Promise<boolean> {
+    this.logger.info({ userId, filePath }, 'Sending file to user');
+
+    if (this.telegramChannel) {
+      return await this.telegramChannel.sendFile(userId, filePath, caption);
+    }
+
+    this.logger.warn({ userId, filePath }, 'No channel available to send file');
+    return false;
   }
 }
 
