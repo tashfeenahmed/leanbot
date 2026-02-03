@@ -23,17 +23,27 @@ Unlike cloud-hosted assistants, ScallopBot gives you:
 
 ## Why ScallopBot?
 
-| Feature | ScallopBot | ChatGPT | Claude.ai |
-|---------|:----------:|:-------:|:---------:|
-| Self-hosted | ✅ | ❌ | ❌ |
-| Full system access | ✅ | ❌ | ❌ |
-| Multi-provider | ✅ | ❌ | ❌ |
-| Cost tracking | ✅ | ❌ | ❌ |
-| Persistent memory | ✅ | Limited | Limited |
-| Custom skills | ✅ | ❌ | ❌ |
-| Voice I/O | ✅ | ✅ | ❌ |
-| File send/receive | ✅ | ❌ | ❌ |
-| Recurring reminders | ✅ | ❌ | ❌ |
+Both ScallopBot and [OpenClaw](https://github.com/openclaw/openclaw) are self-hosted AI assistants. Here's how they differ:
+
+| Feature | ScallopBot | OpenClaw |
+|---------|:----------:|:--------:|
+| **Cost tracking & budgets** | ✅ Built-in | ❌ |
+| **Multi-provider routing** | ✅ 7 providers | ✅ 2 providers |
+| **Smart model selection** | ✅ Auto-routes by task | ❌ Manual |
+| **Setup complexity** | Simple (just Node.js) | Complex (daemon + apps) |
+| **Channels** | Telegram, CLI | 12+ channels |
+| **Native apps** | ❌ | ✅ macOS/iOS/Android |
+| **Voice Wake** | ❌ | ✅ |
+| **Canvas/Visual workspace** | ❌ | ✅ |
+| **Persistent memory** | ✅ Semantic + facts | ✅ |
+| **Skills system** | ✅ OpenClaw-compatible | ✅ |
+| **File send/receive** | ✅ | ✅ |
+| **Recurring reminders** | ✅ | ✅ Cron |
+| **Browser automation** | ✅ | ✅ |
+
+**TL;DR:**
+- Choose **ScallopBot** if you want **cost control**, **multi-provider flexibility**, and **simple deployment**
+- Choose **OpenClaw** if you need **many channels**, **native apps**, and **Voice Wake**
 
 ## Highlights
 
